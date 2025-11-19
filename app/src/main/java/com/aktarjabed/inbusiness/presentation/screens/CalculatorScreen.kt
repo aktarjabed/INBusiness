@@ -8,11 +8,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aktarjabed.inbusiness.presentation.components.InputField
 import com.aktarjabed.inbusiness.presentation.components.MetricCard
 import com.aktarjabed.inbusiness.presentation.viewmodel.CalculatorViewModel
-import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -22,16 +20,13 @@ fun CalculatorScreen(
     val data by viewModel.businessData.collectAsState()
     val metrics by viewModel.financialMetrics.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
-    val errorMsg by viewModel.errorMsg.collectAsStateWithLifecycle(initialValue = null)
 
     val snackbarHostState = remember { SnackbarHostState() }
-    val scope = rememberCoroutineScope()
 
-    errorMsg?.let { msg ->
-        LaunchedEffect(msg) {
-            scope.launch {
-                snackbarHostState.showSnackbar(msg)
-            }
+    // Collect error messages
+    LaunchedEffect(Unit) {
+        viewModel.errorMsg.collect { msg ->
+            snackbarHostState.showSnackbar(msg)
         }
     }
 
@@ -48,23 +43,36 @@ fun CalculatorScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp)
         ) {
+            // Purchase & COGS Section
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
                     Text("Purchase & COGS", style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.height(8.dp))
                     InputField(
                         value = data.rawMaterialsCost.toString(),
-                        onValueChange = { viewModel.updateBusinessData(data.copy(rawMaterialsCost = it.toDoubleOrNull() ?: 0.0)) },
+                        onValueChange = {
+                            viewModel.updateBusinessData(
+                                data.copy(rawMaterialsCost = it.toDoubleOrNull() ?: 0.0)
+                            )
+                        },
                         label = "Raw Materials Cost (₹)"
                     )
                     InputField(
                         value = data.supplierCosts.toString(),
-                        onValueChange = { viewModel.updateBusinessData(data.copy(supplierCosts = it.toDoubleOrNull() ?: 0.0)) },
+                        onValueChange = {
+                            viewModel.updateBusinessData(
+                                data.copy(supplierCosts = it.toDoubleOrNull() ?: 0.0)
+                            )
+                        },
                         label = "Supplier Costs (₹)"
                     )
                     InputField(
                         value = data.inputGst.toString(),
-                        onValueChange = { viewModel.updateBusinessData(data.copy(inputGst = it.toDoubleOrNull() ?: 0.0)) },
+                        onValueChange = {
+                            viewModel.updateBusinessData(
+                                data.copy(inputGst = it.toDoubleOrNull() ?: 0.0)
+                            )
+                        },
                         label = "Input GST (₹)"
                     )
                 }
@@ -72,23 +80,36 @@ fun CalculatorScreen(
 
             Spacer(Modifier.height(12.dp))
 
+            // Sales & Revenue Section
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
                     Text("Sales & Revenue", style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.height(8.dp))
                     InputField(
                         value = data.unitPrice.toString(),
-                        onValueChange = { viewModel.updateBusinessData(data.copy(unitPrice = it.toDoubleOrNull() ?: 0.0)) },
+                        onValueChange = {
+                            viewModel.updateBusinessData(
+                                data.copy(unitPrice = it.toDoubleOrNull() ?: 0.0)
+                            )
+                        },
                         label = "Unit Price (₹)"
                     )
                     InputField(
                         value = data.quantity.toString(),
-                        onValueChange = { viewModel.updateBusinessData(data.copy(quantity = it.toIntOrNull() ?: 0)) },
+                        onValueChange = {
+                            viewModel.updateBusinessData(
+                                data.copy(quantity = it.toIntOrNull() ?: 0)
+                            )
+                        },
                         label = "Quantity"
                     )
                     InputField(
                         value = data.outputGst.toString(),
-                        onValueChange = { viewModel.updateBusinessData(data.copy(outputGst = it.toDoubleOrNull() ?: 0.0)) },
+                        onValueChange = {
+                            viewModel.updateBusinessData(
+                                data.copy(outputGst = it.toDoubleOrNull() ?: 0.0)
+                            )
+                        },
                         label = "Output GST (₹)"
                     )
                 }
@@ -96,6 +117,7 @@ fun CalculatorScreen(
 
             Spacer(Modifier.height(12.dp))
 
+            // Results Section
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
                     Text("Results", style = MaterialTheme.typography.titleMedium)
@@ -137,8 +159,14 @@ fun CalculatorScreen(
                 modifier = Modifier.fillMaxWidth(),
                 enabled = !isLoading && metrics.revenue > 0
             ) {
-                if (isLoading) CircularProgressIndicator(modifier = Modifier.size(16.dp))
-                else Text("Save Scenario")
+                if (isLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                } else {
+                    Text("Save Scenario")
+                }
             }
         }
     }

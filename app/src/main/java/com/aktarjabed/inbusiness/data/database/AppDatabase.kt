@@ -5,6 +5,7 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
+import com.aktarjabed.inbusiness.data.converters.Converters
 import com.aktarjabed.inbusiness.data.dao.BusinessDao
 import com.aktarjabed.inbusiness.data.entities.BusinessData
 import com.aktarjabed.inbusiness.data.entities.CalculationResult
@@ -14,7 +15,7 @@ import com.aktarjabed.inbusiness.data.entities.CalculationResult
     version = 1,
     exportSchema = false
 )
-@TypeConverters(com.aktarjabed.inbusiness.data.database.TypeConverters::class)
+@TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun businessDao(): BusinessDao
 
@@ -29,9 +30,9 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "inbusiness.db"
                 )
-                    .fallbackToDestructiveMigration()
-                    .build()
-                    .also { INSTANCE = it }
+                .fallbackToDestructiveMigration()
+                .build()
+                .also { INSTANCE = it }
             }
     }
 }

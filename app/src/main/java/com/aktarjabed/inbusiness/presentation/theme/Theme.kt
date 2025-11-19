@@ -4,33 +4,34 @@ import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 
 private val DarkScheme = darkColorScheme(
-    primary = Color(0xFF2E7D32),
-    secondary = Color(0xFF4CAF50),
-    tertiary = Color(0xFF8BC34A),
-    background = Color(0xFF121212),
-    surface = Color(0xFF1E1E1E),
-    onPrimary = Color.White,
-    onSecondary = Color.White,
-    onTertiary = Color.Black,
-    onBackground = Color.White,
-    onSurface = Color.White
+    primary = Green700,
+    secondary = Green500,
+    tertiary = LightGreen,
+    background = DarkBackground,
+    surface = DarkSurface,
+    onPrimary = White,
+    onSecondary = White,
+    onTertiary = Black,
+    onBackground = White,
+    onSurface = White,
+    error = Error
 )
 
 private val LightScheme = lightColorScheme(
-    primary = Color(0xFF2E7D32),
-    secondary = Color(0xFF4CAF50),
-    tertiary = Color(0xFF8BC34A),
-    background = Color(0xFFF5F5F5),
-    surface = Color.White,
-    onPrimary = Color.White,
-    onSecondary = Color.White,
-    onTertiary = Color.Black,
-    onBackground = Color.Black,
-    onSurface = Color.Black
+    primary = Green700,
+    secondary = Green500,
+    tertiary = LightGreen,
+    background = LightBackground,
+    surface = White,
+    onPrimary = White,
+    onSecondary = White,
+    onTertiary = Black,
+    onBackground = Black,
+    onSurface = Black,
+    error = Error
 )
 
 @Composable
@@ -49,7 +50,7 @@ fun InBusinessTheme(
     }
     MaterialTheme(
         colorScheme = colorScheme,
-        typography = Typography, // default M3
+        typography = Typography,
         content = content
     )
 }
