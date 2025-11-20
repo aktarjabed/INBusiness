@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <!-- Include encrypted database -->
+    <include domain="database" path="." />
+
+    <!-- Include shared preferences -->
+    <include domain="sharedpref" path="." />
+
+    <!-- Exclude temporary database files -->
+    <exclude domain="database" path="inbusiness_ultra.db-wal" />
+    <exclude domain="database" path="inbusiness_ultra.db-shm" />
+
+    <!-- Exclude cache directory -->
+    <exclude domain="cache" path="." />
+
+    <!-- Exclude temporary files -->
+    <exclude domain="file" path="temp/" />
+</full-backup-content>

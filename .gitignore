@@ -1,0 +1,18 @@
+
+# ═══════════════════════════════════════════════════════════════════════════
+# INBusiness - Security & Credentials
+# ═══════════════════════════════════════════════════════════════════════════
+
+# CRITICAL: Never commit credentials
+local.properties
+keystore.jks
+*.jks
+*.keystore
+
+# Sensitive build outputs
+app/release/
+app/build/outputs/mapping/
+
+# NIC API credentials (backup protection)
+**/nic_credentials.*
+**/api_keys.*

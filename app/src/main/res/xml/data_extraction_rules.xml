@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<data-extraction-rules>
+    <cloud-backup>
+        <!-- Include database for cloud backup -->
+        <include domain="database" path="." />
+        <include domain="sharedpref" path="." />
+
+        <!-- Exclude temporary files -->
+        <exclude domain="database" path="inbusiness_ultra.db-wal" />
+        <exclude domain="database" path="inbusiness_ultra.db-shm" />
+    </cloud-backup>
+
+    <device-transfer>
+        <!-- Include all data for device-to-device transfer -->
+        <include domain="database" path="." />
+        <include domain="sharedpref" path="." />
+        <include domain="file" path="." />
+    </device-transfer>
+</data-extraction-rules>

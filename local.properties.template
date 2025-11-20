@@ -1,0 +1,34 @@
+## This file must *NOT* be checked into Version Control Systems,
+# as it contains information specific to your local configuration.
+#
+# Location: INBusiness/local.properties
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Android SDK Location
+# ═══════════════════════════════════════════════════════════════════════════
+sdk.dir=/Users/YOUR_USERNAME/Library/Android/sdk
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Phase 2: NIC E-Invoicing API Credentials (SANDBOX)
+# ═══════════════════════════════════════════════════════════════════════════
+# Get sandbox credentials from: https://einvoice1.gst.gov.in/
+NIC_USERNAME=your_nic_sandbox_username
+NIC_PASSWORD=your_nic_sandbox_password
+NIC_BASE_URL=https://einv-apisandbox.nic.in
+ENABLE_NIC=true
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Production NIC Credentials (PRODUCTION - Comment out for development)
+# ═══════════════════════════════════════════════════════════════════════════
+# NIC_BASE_URL=https://einvoice1.gst.gov.in
+# NIC_USERNAME=your_production_username
+# NIC_PASSWORD=your_production_password
+# ENABLE_NIC=true
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Release Signing Configuration (Optional - for release builds)
+# ═══════════════════════════════════════════════════════════════════════════
+# KEYSTORE_FILE=../keystore.jks
+# KEYSTORE_PASSWORD=your_keystore_password
+# KEY_ALIAS=inbusiness
+# KEY_PASSWORD=your_key_password
