@@ -3,8 +3,8 @@ plugins {
     id("org.jetbrains.kotlin.android")
     id("com.google.devtools.ksp")
     id("dagger.hilt.android.plugin")
-    id("org.jetbrains.kotlin.plugin.serialization")
-    id("androidx.baselineprofile")
+    id("org.jetbrains.kotlin.plugin.serialization") version "2.0.21" // Phase 2
+    id("androidx.baselineprofile") // Phase 2
 }
 
 android {
@@ -13,18 +13,17 @@ android {
 
     defaultConfig {
         applicationId = "com.aktarjabed.inbusiness"
-        minSdk = 26
+        minSdk = 24
         targetSdk = 35
-        versionCode = 2
-        versionName = "2.0.0"
+        versionCode = 2  // ← INCREMENT for Phase 2
+        versionName = "2.0.0"  // ← Phase 2 version
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        vectorDrawables.useSupportLibrary = true
 
-        vectorDrawables {
-            useSupportLibrary = true
-        }
-
-        // Read NIC credentials from local.properties
+        // ═══════════════════════════════════════════════════════════════
+        // PHASE 2: NIC E-Invoicing Configuration
+        // ═══════════════════════════════════════════════════════════════
         val localProperties = File(rootProject.projectDir, "local.properties")
         val properties = java.util.Properties()
         if (localProperties.exists()) {
@@ -39,7 +38,6 @@ android {
 
     signingConfigs {
         create("release") {
-            // Configure signing from local.properties or environment variables
             val localProperties = File(rootProject.projectDir, "local.properties")
             val properties = java.util.Properties()
             if (localProperties.exists()) {
@@ -59,7 +57,6 @@ android {
             versionNameSuffix = "-debug"
             isMinifyEnabled = false
             isShrinkResources = false
-            isDebuggable = true
         }
 
         release {
@@ -71,7 +68,7 @@ android {
             )
             signingConfig = signingConfigs.getByName("release")
 
-            // Baseline Profile
+            // PHASE 2: Baseline Profile
             baselineProfile.automaticGenerationDuringBuild = true
         }
     }
@@ -84,110 +81,100 @@ android {
     kotlinOptions {
         jvmTarget = "17"
 
+        // PHASE 2: Compiler optimizations
         freeCompilerArgs += listOf(
             "-opt-in=kotlin.RequiresOptIn",
             "-opt-in=kotlinx.coroutines.ExperimentalCoroutinesApi",
-            "-opt-in=androidx.compose.material3.ExperimentalMaterial3Api",
-            "-opt-in=androidx.compose.foundation.ExperimentalFoundationApi"
+            "-opt-in=androidx.compose.material3.ExperimentalMaterial3Api"
         )
     }
 
     buildFeatures {
         compose = true
-        buildConfig = true
+        buildConfig = true  // ← PHASE 2: Enable BuildConfig
     }
 
     composeOptions {
-        kotlinCompilerExtensionVersion = "1.5.14"
+        kotlinCompilerExtensionVersion = "1.5.16"
     }
 
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            // PHASE 2: Additional exclusions for BouncyCastle
             excludes += "/META-INF/DEPENDENCIES"
             excludes += "/META-INF/LICENSE"
             excludes += "/META-INF/LICENSE.txt"
-            excludes += "/META-INF/license.txt"
             excludes += "/META-INF/NOTICE"
             excludes += "/META-INF/NOTICE.txt"
-            excludes += "/META-INF/notice.txt"
-            excludes += "/META-INF/ASL2.0"
-            excludes += "/META-INF/*.kotlin_module"
         }
     }
 }
 
 dependencies {
+    implementation(platform("androidx.compose:compose-bom:2024.11.00"))
+
     // ═══════════════════════════════════════════════════════════════════
     // PHASE 1: Core Android & Jetpack
     // ═══════════════════════════════════════════════════════════════════
+    implementation("androidx.core:core-ktx:1.15.0")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
+    implementation("androidx.activity:activity-compose:1.9.3")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
 
-    // AndroidX Core
-    implementation("androidx.core:core-ktx:1.13.1")
-    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.4")
-    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.4")
-    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.4")
-    implementation("androidx.activity:activity-compose:1.9.1")
-
-    // Jetpack Compose BOM
-    val composeBom = platform("androidx.compose:compose-bom:2024.06.00")
-    implementation(composeBom)
+    // Compose
     implementation("androidx.compose.ui:ui")
-    implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
-
-    // Compose Navigation
-    implementation("androidx.navigation:navigation-compose:2.7.7")
-
-    // Compose Animation
-    implementation("androidx.compose.animation:animation")
-    implementation("androidx.compose.animation:animation-graphics")
+    implementation("androidx.navigation:navigation-compose:2.8.4")
 
     // ═══════════════════════════════════════════════════════════════════
-    // PHASE 1: Room Database (SQLCipher Encrypted)
+    // PHASE 1: Room Database + SQLCipher
     // ═══════════════════════════════════════════════════════════════════
-    val roomVersion = "2.6.1"
+    val roomVersion = "2.7.0-alpha10"
     implementation("androidx.room:room-runtime:$roomVersion")
     implementation("androidx.room:room-ktx:$roomVersion")
     ksp("androidx.room:room-compiler:$roomVersion")
-
-    // SQLCipher for encrypted database
-    implementation("net.zetetic:android-database-sqlcipher:4.5.4")
+    implementation("net.zetetic:sqlcipher-android:4.6.1")
     implementation("androidx.sqlite:sqlite-ktx:2.4.0")
 
     // ═══════════════════════════════════════════════════════════════════
     // PHASE 1: Hilt Dependency Injection
     // ═══════════════════════════════════════════════════════════════════
-    val hiltVersion = "2.51.1"
-    implementation("com.google.dagger:hilt-android:$hiltVersion")
-    ksp("com.google.dagger:hilt-android-compiler:$hiltVersion")
+    implementation("com.google.dagger:hilt-android:2.52")
+    ksp("com.google.dagger:hilt-compiler:2.52")
     implementation("androidx.hilt:hilt-navigation-compose:1.2.0")
 
     // ═══════════════════════════════════════════════════════════════════
-    // PHASE 1: Coroutines
+    // PHASE 1: PDF Generation (iText)
     // ═══════════════════════════════════════════════════════════════════
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1")
+    implementation("com.itextpdf:itext7-core:8.0.5")
+    implementation("com.github.barteksc:android-pdf-viewer:2.8.2")
 
     // ═══════════════════════════════════════════════════════════════════
-    // PHASE 1: PDF Generation (iText 7)
-    // ═══════════════════════════════════════════════════════════════════
-    implementation("com.itextpdf:itext7-core:7.2.5")
-
-    // ═══════════════════════════════════════════════════════════════════
-    // PHASE 1: QR Code Generation (ZXing)
+    // PHASE 1: QR Code
     // ═══════════════════════════════════════════════════════════════════
     implementation("com.google.zxing:core:3.5.3")
+    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
 
     // ═══════════════════════════════════════════════════════════════════
-    // PHASE 1: Charts & Visualization (Vico)
+    // PHASE 1: Date & Time
     // ═══════════════════════════════════════════════════════════════════
-    val vicoVersion = "1.15.0"
-    implementation("com.patrykandpatrick.vico:compose:$vicoVersion")
-    implementation("com.patrykandpatrick.vico:compose-m3:$vicoVersion")
-    implementation("com.patrykandpatrick.vico:core:$vicoVersion")
+    implementation("org.jetbrains.kotlinx:kotlinx-datetime:0.6.1")
+
+    // ═══════════════════════════════════════════════════════════════════
+    // PHASE 1: Charts (Vico)
+    // ═══════════════════════════════════════════════════════════════════
+    implementation("com.patrykandpatrick.vico:compose:2.0.0-alpha.29")
+
+    // ═══════════════════════════════════════════════════════════════════
+    // PHASE 1: DataStore & Security
+    // ═══════════════════════════════════════════════════════════════════
+    implementation("androidx.datastore:datastore-preferences:1.1.1")
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
+    implementation("androidx.core:core-splashscreen:1.0.1")
 
     // ═══════════════════════════════════════════════════════════════════
     // PHASE 2: Network Layer (Retrofit & OkHttp)
@@ -196,23 +183,16 @@ dependencies {
     implementation("com.squareup.retrofit2:converter-gson:2.11.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
-
-    // Gson for JSON parsing
     implementation("com.google.code.gson:gson:2.11.0")
 
     // ═══════════════════════════════════════════════════════════════════
-    // PHASE 2: Security & Encryption
+    // PHASE 2: Security & Encryption (BouncyCastle)
     // ═══════════════════════════════════════════════════════════════════
-
-    // BouncyCastle (CRITICAL for NIC encryption)
     implementation("org.bouncycastle:bcprov-jdk15on:1.70")
     implementation("org.bouncycastle:bcpkix-jdk15on:1.70")
 
-    // Android Keystore & Encrypted SharedPreferences
-    implementation("androidx.security:security-crypto:1.1.0-alpha06")
-
     // ═══════════════════════════════════════════════════════════════════
-    // PHASE 2: AI & Machine Learning (Anomaly Detection)
+    // PHASE 2: AI Anomaly Detection (Apache Commons Math)
     // ═══════════════════════════════════════════════════════════════════
     implementation("org.apache.commons:commons-math3:3.6.1")
 
@@ -220,6 +200,7 @@ dependencies {
     // PHASE 2: Kotlinx Serialization
     // ═══════════════════════════════════════════════════════════════════
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 
     // ═══════════════════════════════════════════════════════════════════
     // PHASE 2: Performance - Baseline Profile
@@ -231,15 +212,8 @@ dependencies {
     // Testing
     // ═══════════════════════════════════════════════════════════════════
     testImplementation("junit:junit:4.13.2")
-    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
-    testImplementation("io.mockk:mockk:1.13.11")
-    testImplementation("com.google.truth:truth:1.4.2")
-
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
-    androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
-    androidTestImplementation(composeBom)
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
-
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 }

@@ -11,6 +11,10 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
+/**
+ * Android Keystore-based Encryption Manager
+ * Provides secure encryption/decryption using AES-GCM
+ */
 class EncryptionManager(private val context: Context) {
 
     private val keyStore: KeyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply {
@@ -18,122 +22,115 @@ class EncryptionManager(private val context: Context) {
     }
 
     init {
-        // Ensure master key exists
-        if (!keyStore.containsAlias(MASTER_KEY_ALIAS)) {
-            generateMasterKey()
+        // Generate encryption key if it doesn't exist
+        if (!keyStore.containsAlias(KEY_ALIAS)) {
+            generateKey()
         }
     }
 
     /**
-     * Encrypt sensitive data using Android Keystore
+     * Encrypt plaintext using Android Keystore
      */
-    fun encrypt(plaintext: String): EncryptedData {
+    fun encrypt(plaintext: String): String {
         try {
             val cipher = Cipher.getInstance(TRANSFORMATION)
-            val secretKey = getOrCreateKey()
-
-            cipher.init(Cipher.ENCRYPT_MODE, secretKey)
+            cipher.init(Cipher.ENCRYPT_MODE, getSecretKey())
 
             val iv = cipher.iv
             val encryptedBytes = cipher.doFinal(plaintext.toByteArray(Charsets.UTF_8))
 
-            return EncryptedData(
-                ciphertext = Base64.encodeToString(encryptedBytes, Base64.NO_WRAP),
-                iv = Base64.encodeToString(iv, Base64.NO_WRAP)
-            )
+            // Combine IV + encrypted data
+            val combined = iv + encryptedBytes
+
+            return Base64.encodeToString(combined, Base64.NO_WRAP)
         } catch (e: Exception) {
             Log.e(TAG, "Encryption failed", e)
-            throw SecurityException("Encryption failed: ${e.message}", e)
+            throw EncryptionException("Failed to encrypt data", e)
         }
     }
 
     /**
-     * Decrypt encrypted data
+     * Decrypt ciphertext using Android Keystore
      */
-    fun decrypt(encryptedData: EncryptedData): String {
+    fun decrypt(ciphertext: String): String {
         try {
+            val combined = Base64.decode(ciphertext, Base64.NO_WRAP)
+
+            // Extract IV (first 12 bytes for GCM)
+            val iv = combined.copyOfRange(0, 12)
+            val encryptedBytes = combined.copyOfRange(12, combined.size)
+
             val cipher = Cipher.getInstance(TRANSFORMATION)
-            val secretKey = getOrCreateKey()
-
-            val iv = Base64.decode(encryptedData.iv, Base64.NO_WRAP)
-            val encryptedBytes = Base64.decode(encryptedData.ciphertext, Base64.NO_WRAP)
-
-            val spec = GCMParameterSpec(GCM_TAG_LENGTH, iv)
-            cipher.init(Cipher.DECRYPT_MODE, secretKey, spec)
+            val spec = GCMParameterSpec(128, iv)
+            cipher.init(Cipher.DECRYPT_MODE, getSecretKey(), spec)
 
             val decryptedBytes = cipher.doFinal(encryptedBytes)
             return String(decryptedBytes, Charsets.UTF_8)
         } catch (e: Exception) {
             Log.e(TAG, "Decryption failed", e)
-            throw SecurityException("Decryption failed: ${e.message}", e)
+            throw EncryptionException("Failed to decrypt data", e)
         }
     }
 
     /**
-     * Generate a secure random encryption key
+     * Generate new encryption key in Android Keystore
      */
-    fun generateSecureKey(length: Int = 32): ByteArray {
-        val key = ByteArray(length)
-        java.security.SecureRandom().nextBytes(key)
-        return key
-    }
-
-    private fun getOrCreateKey(): SecretKey {
-        return if (keyStore.containsAlias(MASTER_KEY_ALIAS)) {
-            keyStore.getKey(MASTER_KEY_ALIAS, null) as SecretKey
-        } else {
-            generateMasterKey()
-        }
-    }
-
-    private fun generateMasterKey(): SecretKey {
-        val keyGenerator = KeyGenerator.getInstance(
-            KeyProperties.KEY_ALGORITHM_AES,
-            ANDROID_KEYSTORE
-        )
-
-        val keyGenParameterSpec = KeyGenParameterSpec.Builder(
-            MASTER_KEY_ALIAS,
-            KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
-        )
-            .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-            .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-            .setKeySize(256)
-            .setUserAuthenticationRequired(false)
-            .setRandomizedEncryptionRequired(true)
-            .build()
-
-        keyGenerator.init(keyGenParameterSpec)
-        val key = keyGenerator.generateKey()
-
-        Log.d(TAG, "Generated new master key")
-        return key
-    }
-
-    /**
-     * Delete all encryption keys (use when user logs out)
-     */
-    fun deleteAllKeys() {
+    private fun generateKey() {
         try {
-            if (keyStore.containsAlias(MASTER_KEY_ALIAS)) {
-                keyStore.deleteEntry(MASTER_KEY_ALIAS)
-                Log.d(TAG, "Deleted master key")
-            }
+            val keyGenerator = KeyGenerator.getInstance(
+                KeyProperties.KEY_ALGORITHM_AES,
+                ANDROID_KEYSTORE
+            )
+
+            val keyGenParameterSpec = KeyGenParameterSpec.Builder(
+                KEY_ALIAS,
+                KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+            )
+                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setKeySize(256)
+                .setUserAuthenticationRequired(false)
+                .build()
+
+            keyGenerator.init(keyGenParameterSpec)
+            keyGenerator.generateKey()
+
+            Log.d(TAG, "Encryption key generated successfully")
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to delete keys", e)
+            Log.e(TAG, "Key generation failed", e)
+            throw EncryptionException("Failed to generate encryption key", e)
         }
     }
 
-    data class EncryptedData(
-        val ciphertext: String,
-        val iv: String
-    )
+    /**
+     * Get encryption key from Android Keystore
+     */
+    private fun getSecretKey(): SecretKey {
+        return keyStore.getKey(KEY_ALIAS, null) as SecretKey
+            ?: throw EncryptionException("Encryption key not found")
+    }
+
+    /**
+     * Delete encryption key (use with caution!)
+     */
+    fun deleteKey() {
+        try {
+            keyStore.deleteEntry(KEY_ALIAS)
+            Log.w(TAG, "Encryption key deleted")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to delete key", e)
+        }
+    }
 
     companion object {
         private const val TAG = "EncryptionManager"
         private const val ANDROID_KEYSTORE = "AndroidKeyStore"
-        private const val MASTER_KEY_ALIAS = "inbusiness_master_key"
+        private const val KEY_ALIAS = "INBusinessEncryptionKey"
         private const val TRANSFORMATION = "AES/GCM/NoPadding"
-        private const val GCM_TAG_LENGTH = 128
     }
 }
+
+/**
+ * Custom exception for encryption errors
+ */
+class EncryptionException(message: String, cause: Throwable? = null) : Exception(message, cause)
