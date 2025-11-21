@@ -1,21 +1,16 @@
 package com.aktarjabed.inbusiness.presentation.screens
 
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
-import com.aktarjabed.inbusiness.presentation.components.MetricCard
-import com.aktarjabed.inbusiness.presentation.viewmodel.CalculatorViewModel
+import androidx.compose.runtime.Composable
 
 @Composable
+<<<<<<< HEAD
+fun DashboardScreen() {
+    // Placeholder
+=======
 fun DashboardScreen(
     viewModel: CalculatorViewModel = hiltViewModel(),
-    onNavigateToCalculator: () -> Unit
+    onNavigateToCalculator: () -> Unit,
+    onNavigateToInvoice: () -> Unit = {}
 ) {
     val metrics by viewModel.financialMetrics.collectAsState()
     val scenarios by viewModel.savedScenarios.collectAsState()
@@ -106,6 +101,14 @@ fun DashboardScreen(
             ) {
                 Text("Open Calculator")
             }
+            Spacer(Modifier.height(8.dp))
+            Button(
+                onClick = onNavigateToInvoice,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Create Invoice")
+            }
         }
     }
+>>>>>>> ad4bb8454e6b04046f0ba290c1f04d22f25fbfa5
 }

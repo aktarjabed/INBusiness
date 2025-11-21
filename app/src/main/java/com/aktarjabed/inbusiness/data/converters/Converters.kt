@@ -1,31 +1,23 @@
 package com.aktarjabed.inbusiness.data.converters
 
 import androidx.room.TypeConverter
-import com.aktarjabed.inbusiness.data.entities.GstType
 import java.time.Instant
 
 class Converters {
     @TypeConverter
-    fun fromTimestamp(value: Long?): Instant? {
-        return value?.let { Instant.ofEpochMilli(it) }
-    }
+    fun fromInstant(value: Instant?): Long? = value?.toEpochMilli()
 
     @TypeConverter
-    fun instantToTimestamp(instant: Instant?): Long? {
-        return instant?.toEpochMilli()
-    }
+    fun toInstant(value: Long?): Instant? = value?.let { Instant.ofEpochMilli(it) }
 
     @TypeConverter
-    fun fromGstType(value: GstType): String {
-        return value.name
-    }
+    fun fromStringList(value: List<String>?): String? = value?.joinToString(",")
 
     @TypeConverter
-    fun toGstType(value: String): GstType {
-        return try {
-            GstType.valueOf(value)
-        } catch (e: IllegalArgumentException) {
-            GstType.SGST_CGST // safe default
-        }
-    }
+<<<<<<< HEAD
+    fun toStringList(value: String?): List<String>? =
+=======
+    fun toStringList(value: String?): List<String>? =
+>>>>>>> ad4bb8454e6b04046f0ba290c1f04d22f25fbfa5
+        value?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }
 }

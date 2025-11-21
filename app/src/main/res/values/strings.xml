@@ -1,3 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">INBusiness</string>
+
+    <!-- Auth -->
+    <string name="sign_in">Sign In</string>
+    <string name="sign_up">Sign Up</string>
+    <string name="sign_out">Sign Out</string>
+    <string name="email">Email</string>
+    <string name="password">Password</string>
+    <string name="phone_number">Phone Number</string>
+    <string name="continue_with_google">Continue with Google</string>
+    <string name="continue_with_microsoft">Continue with Microsoft</string>
+    <string name="continue_with_phone">Continue with Phone (OTP)</string>
+
+    <!-- Payment -->
+    <string name="upgrade_to_premium">Upgrade to Premium</string>
+    <string name="payment_success">Payment Successful</string>
+    <string name="payment_failed">Payment Failed</string>
+    <string name="choose_plan">Choose Your Plan</string>
+
+    <!-- Common -->
+    <string name="ok">OK</string>
+    <string name="cancel">Cancel</string>
+    <string name="retry">Retry</string>
+    <string name="back">Back</string>
+
+    <!-- Errors -->
+    <string name="error_generic">Something went wrong. Please try again.</string>
+    <string name="error_network">Network error. Check your connection.</string>
+    <string name="error_auth_failed">Authentication failed</string>
 </resources>
