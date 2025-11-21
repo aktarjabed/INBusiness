@@ -17,13 +17,19 @@ android {
         versionName = "1.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
+        buildConfigField("long", "BUILD_TIME", "${System.currentTimeMillis()}L")
+        buildConfigField("String", "GIT_HASH", "\"${getGitHash()}\"")
+    }
+
+    buildFeatures {
+        buildConfig = true
     }
 
     buildTypes {
         release {
             isMinifyEnabled  = true
             isShrinkResources= true
-            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
 
@@ -35,6 +41,15 @@ android {
     buildFeatures.compose = true
     composeOptions.kotlinCompilerExtensionVersion = "1.5.11"
     packaging.resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
+}
+
+fun getGitHash(): String {
+    return try {
+        val process = Runtime.getRuntime().exec("git rev-parse HEAD")
+        process.inputStream.bufferedReader().readText().trim()
+    } catch (e: Exception) {
+        "unknown"
+    }
 }
 
 dependencies {
@@ -66,7 +81,7 @@ dependencies {
     implementation("com.patrykandpatrick.vico:compose-m3:1.14.0")
 
     // DataStore
-    implementation("androidx.datastore:datastore-preferences:1.1.1")
+    implementation("androidx.datastore:datastore-preferences:1.0.0")
 
     // Splash
     implementation("androidx.core:core-splashscreen:1.0.1")

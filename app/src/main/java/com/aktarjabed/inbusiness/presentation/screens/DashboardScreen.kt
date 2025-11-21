@@ -3,6 +3,8 @@ package com.aktarjabed.inbusiness.presentation.screens
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -15,7 +17,9 @@ import com.aktarjabed.inbusiness.presentation.viewmodel.CalculatorViewModel
 @Composable
 fun DashboardScreen(
     viewModel: CalculatorViewModel = hiltViewModel(),
-    onNavigateToCalculator: () -> Unit
+    onNavigateToCalculator: () -> Unit,
+    onNavigateToInvoice: () -> Unit = {},
+    onNavigateToSettings: () -> Unit = {}
 ) {
     val metrics by viewModel.financialMetrics.collectAsState()
     val scenarios by viewModel.savedScenarios.collectAsState()
@@ -26,7 +30,16 @@ fun DashboardScreen(
             .padding(16.dp)
     ) {
         item {
-            Text("Dashboard", style = MaterialTheme.typography.headlineLarge)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Dashboard", style = MaterialTheme.typography.headlineLarge)
+                IconButton(onClick = onNavigateToSettings) {
+                    Icon(Icons.Default.Settings, contentDescription = "Settings")
+                }
+            }
             Spacer(Modifier.height(16.dp))
         }
 
@@ -105,6 +118,13 @@ fun DashboardScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text("Open Calculator")
+            }
+            Spacer(Modifier.height(8.dp))
+            Button(
+                onClick = onNavigateToInvoice,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Create Invoice")
             }
         }
     }
