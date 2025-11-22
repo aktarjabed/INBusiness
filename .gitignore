@@ -1,0 +1,8 @@
+# Ignore Gradle build artifacts
+.gradle/
+build/
+app/build/
+gradle/wrapper/gradle-wrapper.properties
+gradle/wrapper/gradle-wrapper.jar
+gradlew
+gradlew.bat

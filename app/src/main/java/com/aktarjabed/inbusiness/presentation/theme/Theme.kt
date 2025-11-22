@@ -1,56 +1,47 @@
 package com.aktarjabed.inbusiness.presentation.theme
 
-import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.Color
 
-private val DarkScheme = darkColorScheme(
-    primary = Green700,
-    secondary = Green500,
-    tertiary = LightGreen,
-    background = DarkBackground,
-    surface = DarkSurface,
-    onPrimary = White,
-    onSecondary = White,
-    onTertiary = Black,
-    onBackground = White,
-    onSurface = White,
-    error = Error
+private val md_theme_light_primary = Color(0xFF6200EE)
+private val md_theme_light_onPrimary = Color(0xFFFFFFFF)
+private val md_theme_light_primaryContainer = Color(0xFFEADDFF)
+private val md_theme_light_secondary = Color(0xFF03DAC6)
+
+private val md_theme_dark_primary = Color(0xFFBB86FC)
+private val md_theme_dark_onPrimary = Color(0xFF000000)
+private val md_theme_dark_primaryContainer = Color(0xFF3700B3)
+private val md_theme_dark_secondary = Color(0xFF03DAC6)
+
+private val LightColorScheme = lightColorScheme(
+    primary = md_theme_light_primary,
+    onPrimary = md_theme_light_onPrimary,
+    primaryContainer = md_theme_light_primaryContainer,
+    secondary = md_theme_light_secondary
 )
 
-private val LightScheme = lightColorScheme(
-    primary = Green700,
-    secondary = Green500,
-    tertiary = LightGreen,
-    background = LightBackground,
-    surface = White,
-    onPrimary = White,
-    onSecondary = White,
-    onTertiary = Black,
-    onBackground = Black,
-    onSurface = Black,
-    error = Error
+private val DarkColorScheme = darkColorScheme(
+    primary = md_theme_dark_primary,
+    onPrimary = md_theme_dark_onPrimary,
+    primaryContainer = md_theme_dark_primaryContainer,
+    secondary = md_theme_dark_secondary
 )
 
 @Composable
-fun InBusinessTheme(
+fun INBusinessTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
-    dynamicColor: Boolean = true,
     content: @Composable () -> Unit
 ) {
     val colorScheme = when {
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-            val context = LocalContext.current
-            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-        }
-        darkTheme -> DarkScheme
-        else -> LightScheme
+        darkTheme -> DarkColorScheme
+        else -> LightColorScheme
     }
+
     MaterialTheme(
         colorScheme = colorScheme,
-        typography = Typography,
+        typography = Typography(),
         content = content
     )
 }

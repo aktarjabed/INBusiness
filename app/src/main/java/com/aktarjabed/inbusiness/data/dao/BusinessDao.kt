@@ -2,29 +2,23 @@ package com.aktarjabed.inbusiness.data.dao
 
 import androidx.room.*
 import com.aktarjabed.inbusiness.data.entities.BusinessData
-import com.aktarjabed.inbusiness.data.entities.CalculationResult
 import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface BusinessDao {
-    @Query("SELECT * FROM business_data ORDER BY createdAt DESC")
-    fun getAllBusinessData(): Flow<List<BusinessData>>
 
-    @Query("SELECT * FROM business_data WHERE id = :id")
-    suspend fun getBusinessDataById(id: String): BusinessData?
+    @Query("SELECT * FROM business_data LIMIT 1")
+    suspend fun getBusinessData(): BusinessData?
+
+    @Query("SELECT * FROM business_data LIMIT 1")
+    fun getBusinessDataFlow(): Flow<BusinessData?>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertBusinessData(data: BusinessData)
+    suspend fun insert(businessData: BusinessData)
+
+    @Update
+    suspend fun update(businessData: BusinessData)
 
     @Delete
-    suspend fun deleteBusinessData(data: BusinessData)
-
-    @Query("SELECT * FROM calculation_results WHERE businessDataId = :businessDataId")
-    fun getCalculationResults(businessDataId: String): Flow<List<CalculationResult>>
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertCalculationResult(result: CalculationResult)
-
-    @Query("DELETE FROM calculation_results WHERE businessDataId = :businessDataId")
-    suspend fun deleteCalculationResults(businessDataId: String)
+    suspend fun delete(businessData: BusinessData)
 }
