@@ -33,7 +33,8 @@ class InvoiceViewModel @Inject constructor(
             _uiState.value = InvoiceUiState.Loading
 
             try {
-                val verdict = quotaGate.assertQuota(currentUserId)
+                // Peek without consuming
+                val verdict = quotaGate.assertQuota(currentUserId, consume = false)
 
                 when (verdict) {
                     is QuotaVerdict.Allowed -> {
@@ -76,8 +77,8 @@ class InvoiceViewModel @Inject constructor(
             _uiState.value = InvoiceUiState.Loading
 
             try {
-                // Double-check quota before creating
-                val verdict = quotaGate.assertQuota(currentUserId)
+                // Double-check quota before creating (and consume it)
+                val verdict = quotaGate.assertQuota(currentUserId, consume = true)
                 if (verdict !is QuotaVerdict.Allowed) {
                     _uiState.value = InvoiceUiState.QuotaBlocked(verdict)
                     return@launch

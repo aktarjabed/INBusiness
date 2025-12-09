@@ -21,21 +21,21 @@ class QuotaGate @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
 
-    suspend fun assertQuota(userId: String): QuotaVerdict = withContext(Dispatchers.IO) {
+    suspend fun assertQuota(userId: String, consume: Boolean = true): QuotaVerdict = withContext(Dispatchers.IO) {
         val today = clock.todayEpochDay()
         val entity = dao.getQuota(userId) ?: createFirstQuota(userId, today)
 
         // Roll daily
         if (entity.lastResetEpochDay != today) {
             dao.resetDaily(userId, today)
-            return@withContext assertQuota(userId)
+            return@withContext assertQuota(userId, consume)
         }
 
         // Roll monthly
         val monthStart = clock.monthStartEpochDay()
         if (entity.lastMonthlyResetEpochDay != monthStart) {
             dao.resetMonthly(userId, monthStart)
-            return@withContext assertQuota(userId)
+            return@withContext assertQuota(userId, consume)
         }
 
         // Check expiry
@@ -59,8 +59,12 @@ class QuotaGate @Inject constructor(
             }
 
             else -> {
-                dao.incrementUsage(userId)
-                QuotaVerdict.Allowed(dailyCap - entity.dailyUsed - 1)
+                if (consume) {
+                    dao.incrementUsage(userId)
+                    QuotaVerdict.Allowed(dailyCap - entity.dailyUsed - 1)
+                } else {
+                    QuotaVerdict.Allowed(dailyCap - entity.dailyUsed)
+                }
             }
         }
     }
