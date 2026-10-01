@@ -17,8 +17,8 @@ import com.aktarjabed.inbusiness.data.repository.InvoiceRepository
 import com.aktarjabed.inbusiness.domain.context.BusinessContext
 import com.aktarjabed.inbusiness.domain.invoice.CalculateInvoiceTotalsUseCase
 import com.aktarjabed.inbusiness.domain.invoice.InvoiceCreationResult
-import com.aktarjabed.inbusiness.domain.invoice.SupplyType
 import com.aktarjabed.inbusiness.domain.device.DeviceClassifier
+import com.aktarjabed.inbusiness.domain.invoice.SupplyType
 import com.aktarjabed.inbusiness.domain.quota.QuotaGate
 import com.aktarjabed.inbusiness.util.SystemClock
 import kotlinx.coroutines.*
@@ -127,7 +127,6 @@ class InvoiceConcurrencyTest {
     @Test
     fun testSequenceConcurrency() = runBlocking {
         useUnboundedQuota()
-        // Given allowed quota
 
         val items = listOf(InvoiceItem(description = "Item", quantity = 1.0, pricePerUnit = 100.0, gstPercentage = 5.0))
 

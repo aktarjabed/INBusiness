@@ -66,8 +66,9 @@ until the emulator job is green.**
    validation.
 5. **Security/data safety.** `allowBackup=false` with full-domain exclusions, cleartext disabled,
    `.gitignore` for keystores/DBs/PDFs, dead encryption layer removed.
-6. **Regression coverage.** Six new JVM suites plus expanded existing ones (830 added test lines; CI now executes **71 cases in 12 classes**), and instrumented ledger/concurrency/migration
-   suites that compile and run for the first time.
+6. **Regression coverage.** Six new JVM suites plus expanded existing ones (830 added test lines;
+   CI now executes **71 cases in 12 classes**), and instrumented ledger/concurrency/migration suites
+   that compile and run for the first time.
 
 **Verification status.** *Partially by execution, partially by inspection — the distinction is
 stated per row.* Executed and green in CI: app + unit-test + lint compilation, 71 JVM test cases,
