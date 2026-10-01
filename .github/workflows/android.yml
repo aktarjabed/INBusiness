@@ -109,7 +109,17 @@ jobs:
         target: google_apis
         emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
         disable-animations: true
-        script: ./gradlew connectedDebugAndroidTest
+        script: ./gradlew connectedDebugAndroidTest --stacktrace --console=plain 2>&1 | tee instrumentation.log
+
+    - name: Report instrumented test failure details
+      if: failure()
+      shell: bash
+      run: |
+        if [[ -f instrumentation.log ]]; then
+          tail -n 50 instrumentation.log
+          summary=$(tail -n 35 instrumentation.log | sed -e 's/%/%25/g' -e 's/\r/%0D/g' | paste -sd ' ' -)
+          echo "::error title=Instrumented test diagnostics::$summary"
+        fi
 
     - name: Upload Instrumented Test Reports
       if: always()
