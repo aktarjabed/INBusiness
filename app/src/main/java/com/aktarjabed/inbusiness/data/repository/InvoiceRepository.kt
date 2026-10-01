@@ -159,23 +159,9 @@ class InvoiceRepository @Inject constructor(
                             ))
                         }
 
-                        database.stockMovementDao().insertMovement(
-                            com.aktarjabed.inbusiness.data.entities.StockMovement(
-                                businessId = businessId.toLong(),
-                                productId = item.productId,
-                                movementType = "SALE",
-                                quantity = -item.quantity,
-                                stockBefore = product.availableStock,
-                                stockAfter = product.availableStock - item.quantity,
-                                referenceType = "INVOICE",
-                                referenceId = invoiceId,
-                                reason = "Invoice creation"
-                            )
-                        )
-
                         stockMovementDao.insertMovement(
                             com.aktarjabed.inbusiness.data.entities.StockMovement(
-                                businessId = businessId.toLong(),
+                                businessId = businessId,
                                 productId = item.productId,
                                 movementType = "SALE",
                                 quantity = -item.quantity,
@@ -242,9 +228,9 @@ class InvoiceRepository @Inject constructor(
 
                 // 5. Initial Payment Insertion
                 if (calcResult.amountPaid > 0.0) {
-                    database.paymentDao().insertPayment(
+                    paymentDao.insertPayment(
                         com.aktarjabed.inbusiness.data.entities.Payment(
-                            businessId = businessId.toLong(),
+                            businessId = businessId,
                             invoiceId = invoiceId,
                             amount = calcResult.amountPaid,
                             paymentMode = paymentMethod,
@@ -309,9 +295,9 @@ class InvoiceRepository @Inject constructor(
                             productDao.addStock(item.productId, businessId, item.quantity)
 
                             // 3. Create SALE_REVERSAL movement
-                            database.stockMovementDao().insertMovement(
+                            stockMovementDao.insertMovement(
                                 com.aktarjabed.inbusiness.data.entities.StockMovement(
-                                    businessId = businessId.toLong(),
+                                    businessId = businessId,
                                     productId = item.productId,
                                     movementType = "SALE_REVERSAL",
                                     quantity = item.quantity,

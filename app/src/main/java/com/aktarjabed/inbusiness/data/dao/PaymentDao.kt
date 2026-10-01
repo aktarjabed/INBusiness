@@ -13,8 +13,8 @@ interface PaymentDao {
     suspend fun insertPayment(payment: Payment): Long
 
     @Query("SELECT SUM(amount) FROM payments WHERE invoiceId = :invoiceId AND businessId = :businessId AND status = 'SUCCESS'")
-    suspend fun getTotalPaidForInvoice(businessId: Long, invoiceId: String): Double?
+    suspend fun getTotalPaidForInvoice(businessId: String, invoiceId: String): Double?
 
     @Query("SELECT * FROM payments WHERE invoiceId = :invoiceId AND businessId = :businessId ORDER BY paymentDate DESC")
-    fun getPaymentsForInvoice(businessId: Long, invoiceId: String): Flow<List<Payment>>
+    fun getPaymentsForInvoice(businessId: String, invoiceId: String): Flow<List<Payment>>
 }

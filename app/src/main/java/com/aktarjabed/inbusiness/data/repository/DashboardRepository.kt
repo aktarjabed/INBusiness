@@ -25,35 +25,35 @@ class DashboardRepository @Inject constructor(
     private val businessContext: BusinessContext
 ) {
     fun observeTotalRevenue(): Flow<Double> = businessContext.activeBusinessId.flatMapLatest { businessId ->
-        dashboardDao.observeTotalRevenue(businessId.toLong())
+        dashboardDao.observeTotalRevenue(businessId)
     }
 
     fun observeTodayRevenue(): Flow<Double> = businessContext.activeBusinessId.flatMapLatest { businessId ->
         val startOfDay = AppDateUtils.getTodayStart()
         val startOfNextDay = AppDateUtils.getTomorrowStart()
-        dashboardDao.observeTodayRevenue(businessId.toLong(), startOfDay, startOfNextDay)
+        dashboardDao.observeTodayRevenue(businessId, startOfDay, startOfNextDay)
     }
 
     fun observePendingDues(): Flow<Double> = businessContext.activeBusinessId.flatMapLatest { businessId ->
-        dashboardDao.observePendingDues(businessId.toLong())
+        dashboardDao.observePendingDues(businessId)
     }
 
     fun observeInvoicesTodayCount(): Flow<Int> = businessContext.activeBusinessId.flatMapLatest { businessId ->
         val startOfDay = AppDateUtils.getTodayStart()
         val startOfNextDay = AppDateUtils.getTomorrowStart()
-        dashboardDao.getInvoicesTodayCount(businessId.toLong(), startOfDay, startOfNextDay)
+        dashboardDao.getInvoicesTodayCount(businessId, startOfDay, startOfNextDay)
     }
 
     fun observeActiveProductsCount(): Flow<Int> = businessContext.activeBusinessId.flatMapLatest { businessId ->
-        dashboardDao.observeActiveProductsCount(businessId.toLong())
+        dashboardDao.observeActiveProductsCount(businessId)
     }
 
     fun observeLowStockProductsCount(): Flow<Int> = businessContext.activeBusinessId.flatMapLatest { businessId ->
-        dashboardDao.observeLowStockProductsCount(businessId.toLong())
+        dashboardDao.observeLowStockProductsCount(businessId)
     }
 
     suspend fun getSevenDayChartData(): List<ChartPoint> = withContext(Dispatchers.IO) {
-        val businessId = businessContext.activeBusinessId.first().toLong()
+        val businessId = businessContext.activeBusinessId.first()
         val pastSevenDays = AppDateUtils.getPastSevenDays()
         val startTime = AppDateUtils.getStartOfDay(pastSevenDays.first()) // 6 days ago start of day
 

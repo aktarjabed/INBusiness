@@ -11,6 +11,7 @@ import com.aktarjabed.inbusiness.presentation.screens.DashboardScreen
 import com.aktarjabed.inbusiness.presentation.screens.inventory.InventoryListScreen
 import com.aktarjabed.inbusiness.presentation.screens.inventory.ProductEntryScreen
 import com.aktarjabed.inbusiness.presentation.screens.invoice.InvoiceScreen
+import com.aktarjabed.inbusiness.presentation.screens.invoice_history.InvoiceHistoryScreen
 import com.aktarjabed.inbusiness.presentation.screens.invoice_preview.InvoicePreviewScreen
 import com.aktarjabed.inbusiness.presentation.screens.SplashScreen
 import com.aktarjabed.inbusiness.presentation.screens.SetupScreen
@@ -46,7 +47,8 @@ fun InBusinessNavGraph() {
             DashboardScreen(
                 onNavigateToCalculator = { navController.navigate(NavigationRoutes.CALCULATOR) },
                 onNavigateToInvoice = { navController.navigate(NavigationRoutes.INVOICE) },
-                onNavigateToInventory = { navController.navigate(NavigationRoutes.INVENTORY) }
+                onNavigateToInventory = { navController.navigate(NavigationRoutes.INVENTORY) },
+                onNavigateToHistory = { navController.navigate(NavigationRoutes.INVOICE_HISTORY) }
             )
         }
         composable(NavigationRoutes.CALCULATOR) {
@@ -75,6 +77,14 @@ fun InBusinessNavGraph() {
                 onNavigateBack = { navController.popBackStack() },
                 onNavigateToAddProduct = { navController.navigate(NavigationRoutes.ADD_PRODUCT) },
                 onNavigateToEditProduct = { productId -> navController.navigate(NavigationRoutes.editProduct(productId)) }
+            )
+        }
+        composable(NavigationRoutes.INVOICE_HISTORY) {
+            InvoiceHistoryScreen(
+                onNavigateBack = { navController.popBackStack() },
+                onNavigateToPreview = { invoiceId ->
+                    navController.navigate(NavigationRoutes.invoicePreview(invoiceId))
+                }
             )
         }
         composable(NavigationRoutes.ADD_PRODUCT) {

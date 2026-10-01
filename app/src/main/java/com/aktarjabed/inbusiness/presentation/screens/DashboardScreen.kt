@@ -5,11 +5,27 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.patrykandpatrick.vico.compose.cartesian.CartesianChartHost
+import com.patrykandpatrick.vico.compose.cartesian.axis.rememberAxisGuidelineComponent
+import com.patrykandpatrick.vico.compose.cartesian.axis.rememberAxisLabelComponent
+import com.patrykandpatrick.vico.compose.cartesian.axis.rememberAxisTickComponent
+import com.patrykandpatrick.vico.compose.cartesian.layer.rememberColumnCartesianLayer
+import com.patrykandpatrick.vico.compose.cartesian.rememberCartesianChart
+import com.patrykandpatrick.vico.compose.common.fill
+import com.patrykandpatrick.vico.core.cartesian.axis.HorizontalAxis
+import com.patrykandpatrick.vico.core.cartesian.axis.VerticalAxis
+import com.patrykandpatrick.vico.core.cartesian.data.CartesianChartModelProducer
+import com.patrykandpatrick.vico.core.cartesian.data.columnSeries
+import com.patrykandpatrick.vico.core.cartesian.formatter.CartesianValueFormatter
 import com.aktarjabed.inbusiness.presentation.components.MetricCard
 import com.aktarjabed.inbusiness.presentation.screens.dashboard.DashboardViewModel
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DashboardScreen(
     viewModel: DashboardViewModel = hiltViewModel(),
@@ -19,6 +35,39 @@ fun DashboardScreen(
     onNavigateToHistory: () -> Unit = {}
 ) {
     val state by viewModel.uiState.collectAsState()
+
+    // Build Vico chart model from chart data
+    val chartModelProducer = remember { CartesianChartModelProducer() }
+    LaunchedEffect(state.chartData) {
+        if (state.chartData.isNotEmpty()) {
+            chartModelProducer.runTransaction {
+                columnSeries { series(state.chartData.map { it.revenue }) }
+            }
+        }
+    }
+
+    // X-axis formatter: index → day abbreviation (e.g. "Mon")
+    val dayFormatter = remember { DateTimeFormatter.ofPattern("EEE") }
+    val xFormatter = remember(state.chartData) {
+        CartesianValueFormatter { context, x, _ ->
+            val index = x.toInt()
+            if (index in state.chartData.indices) {
+                state.chartData[index].date.format(dayFormatter)
+            } else ""
+        }
+    }
+
+    // Y-axis formatter: value → "₹1.5K" or "₹2L" style
+    val yFormatter = remember {
+        CartesianValueFormatter { _, y, _ ->
+            val v = y
+            when {
+                v >= 1_00_000 -> "₹${String.format("%.1f", v / 1_00_000)}L"
+                v >= 1_000 -> "₹${String.format("%.1f", v / 1_000)}K"
+                else -> "₹${String.format("%.0f", v)}"
+            }
+        }
+    }
 
     LazyColumn(
         Modifier
@@ -85,15 +134,41 @@ fun DashboardScreen(
                 Spacer(Modifier.height(24.dp))
             }
 
-            // 7-day chart mockup mapping
+            // 7-day revenue bar chart using Vico
             item {
                 Text("7-Day Revenue", style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(8.dp))
-                state.chartData.forEach { point ->
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(point.date.toString())
-                        Text("₹${"%.2f".format(point.revenue)}")
-                    }
+
+                if (state.chartData.isNotEmpty()) {
+                    val columnLayer = rememberColumnCartesianLayer()
+                    val bottomAxis = HorizontalAxis.rememberBottom(
+                        valueFormatter = xFormatter,
+                        tick = null,
+                        guideline = null
+                    )
+                    val startAxis = VerticalAxis.rememberStart(
+                        valueFormatter = yFormatter,
+                        tick = null,
+                        guideline = rememberAxisGuidelineComponent(fill(Color.Gray.copy(alpha = 0.2f)))
+                    )
+
+                    CartesianChartHost(
+                        chart = rememberCartesianChart(
+                            columnLayer,
+                            startAxis = startAxis,
+                            bottomAxis = bottomAxis
+                        ),
+                        modelProducer = chartModelProducer,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(220.dp)
+                    )
+                } else {
+                    Text(
+                        "No revenue data for the past 7 days",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
                 Spacer(Modifier.height(24.dp))
             }
