@@ -25,7 +25,17 @@ jobs:
       run: chmod +x gradlew
 
     - name: Build with Gradle
-      run: ./gradlew assembleDebug
+      run: ./gradlew assembleDebug --stacktrace --console=plain 2>&1 | tee gradle-build.log
+
+    - name: Report Gradle failure details
+      if: failure()
+      shell: bash
+      run: |
+        if [[ -f gradle-build.log ]]; then
+          tail -n 40 gradle-build.log
+          summary=$(tail -n 30 gradle-build.log | sed -e 's/%/%25/g' -e 's/\r/%0D/g' | paste -sd ' ' -)
+          echo "::error title=Gradle build diagnostics::$summary"
+        fi
 
     - name: Run Unit Tests
       run: ./gradlew testDebugUnitTest
