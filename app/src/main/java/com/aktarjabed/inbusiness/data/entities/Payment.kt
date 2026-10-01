@@ -25,7 +25,7 @@ data class Payment(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0,
     @ColumnInfo(name = "businessId")
-    val businessId: Long,
+    val businessId: String,
     @ColumnInfo(name = "invoiceId")
     val invoiceId: String,
     val amount: Double,

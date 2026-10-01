@@ -27,7 +27,7 @@ import net.sqlcipher.database.SupportFactory
         Payment::class,
         StockMovement::class
     ],
-    version = 18,
+    version = 19,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -246,6 +246,40 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        // Normalize businessId from Long/INTEGER to String/TEXT for consistency
+        // with BusinessData.id (String) and BusinessContext.activeBusinessId (String Flow)
+        val MIGRATION_18_19 = object : Migration(18, 19) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("PRAGMA foreign_keys=OFF")
+
+                // 1. stock_movements: recreate with TEXT businessId
+                db.execSQL("CREATE TABLE `stock_movements_new` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `businessId` TEXT NOT NULL, `productId` INTEGER NOT NULL, `movementType` TEXT NOT NULL, `quantity` REAL NOT NULL, `stockBefore` REAL NOT NULL, `stockAfter` REAL NOT NULL, `referenceType` TEXT NOT NULL, `referenceId` TEXT NOT NULL, `reason` TEXT NOT NULL DEFAULT '', `createdAt` INTEGER NOT NULL, FOREIGN KEY(`productId`) REFERENCES `products`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT)")
+                db.execSQL("INSERT INTO `stock_movements_new` (`id`, `businessId`, `productId`, `movementType`, `quantity`, `stockBefore`, `stockAfter`, `referenceType`, `referenceId`, `reason`, `createdAt`) SELECT `id`, CAST(`businessId` AS TEXT), `productId`, `movementType`, `quantity`, `stockBefore`, `stockAfter`, `referenceType`, `referenceId`, `reason`, `createdAt` FROM `stock_movements`")
+                db.execSQL("DROP TABLE `stock_movements`")
+                db.execSQL("ALTER TABLE `stock_movements_new` RENAME TO `stock_movements`")
+                db.execSQL("CREATE INDEX `index_stock_movements_businessId` ON `stock_movements` (`businessId`)")
+                db.execSQL("CREATE INDEX `index_stock_movements_productId` ON `stock_movements` (`productId`)")
+                db.execSQL("CREATE INDEX `index_stock_movements_referenceId` ON `stock_movements` (`referenceId`)")
+
+                // 2. payments: recreate with TEXT businessId
+                db.execSQL("CREATE TABLE `payments_new` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `businessId` TEXT NOT NULL, `invoiceId` TEXT NOT NULL, `amount` REAL NOT NULL, `paymentMode` TEXT NOT NULL DEFAULT 'CASH', `paymentDate` INTEGER NOT NULL, `referenceNumber` TEXT NOT NULL DEFAULT '', `status` TEXT NOT NULL DEFAULT 'SUCCESS', FOREIGN KEY(`invoiceId`) REFERENCES `invoices`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT)")
+                db.execSQL("INSERT INTO `payments_new` (`id`, `businessId`, `invoiceId`, `amount`, `paymentMode`, `paymentDate`, `referenceNumber`, `status`) SELECT `id`, CAST(`businessId` AS TEXT), `invoiceId`, `amount`, `paymentMode`, `paymentDate`, `referenceNumber`, `status` FROM `payments`")
+                db.execSQL("DROP TABLE `payments`")
+                db.execSQL("ALTER TABLE `payments_new` RENAME TO `payments`")
+                db.execSQL("CREATE INDEX `index_payments_businessId` ON `payments` (`businessId`)")
+                db.execSQL("CREATE INDEX `index_payments_invoiceId` ON `payments` (`invoiceId`)")
+
+                // 3. customers: recreate with TEXT businessId
+                db.execSQL("CREATE TABLE `customers_new` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `businessId` TEXT NOT NULL, `name` TEXT NOT NULL, `address` TEXT NOT NULL DEFAULT '', `gstin` TEXT NOT NULL DEFAULT '', `phone` TEXT NOT NULL DEFAULT '', `isActive` INTEGER NOT NULL DEFAULT 1, FOREIGN KEY(`businessId`) REFERENCES `business_data`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT)")
+                db.execSQL("INSERT INTO `customers_new` (`id`, `businessId`, `name`, `address`, `gstin`, `phone`, `isActive`) SELECT `id`, CAST(`businessId` AS TEXT), `name`, `address`, `gstin`, `phone`, `isActive` FROM `customers`")
+                db.execSQL("DROP TABLE `customers`")
+                db.execSQL("ALTER TABLE `customers_new` RENAME TO `customers`")
+                db.execSQL("CREATE UNIQUE INDEX `index_customers_businessId_name` ON `customers` (`businessId`, `name`)")
+
+                db.execSQL("PRAGMA foreign_keys=ON")
+            }
+        }
+
 
         val MIGRATION_7_8 = object : Migration(7, 8) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -311,7 +345,7 @@ abstract class AppDatabase : RoomDatabase() {
                 DATABASE_NAME
             )
                 .openHelperFactory(factory)
-                .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18)
+                .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19)
                 .addCallback(DatabaseCallback())
                 .build()
         }

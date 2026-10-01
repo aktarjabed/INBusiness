@@ -17,14 +17,14 @@ interface CustomerDao {
     suspend fun updateCustomer(customer: Customer)
 
     @Query("SELECT * FROM customers WHERE businessId = :businessId AND isActive = 1 ORDER BY name ASC")
-    fun getAllCustomers(businessId: Long): Flow<List<Customer>>
+    fun getAllCustomers(businessId: String): Flow<List<Customer>>
 
     @Query("SELECT * FROM customers WHERE businessId = :businessId AND name LIKE '%' || :query || '%' AND isActive = 1 ORDER BY name ASC")
-    fun searchCustomers(businessId: Long, query: String): Flow<List<Customer>>
+    fun searchCustomers(businessId: String, query: String): Flow<List<Customer>>
 
     @Query("SELECT * FROM customers WHERE id = :id AND businessId = :businessId")
-    suspend fun getCustomerById(businessId: Long, id: Long): Customer?
+    suspend fun getCustomerById(businessId: String, id: Long): Customer?
 
     @Query("SELECT * FROM customers WHERE name = :name AND businessId = :businessId LIMIT 1")
-    suspend fun getCustomerByName(businessId: Long, name: String): Customer?
+    suspend fun getCustomerByName(businessId: String, name: String): Customer?
 }

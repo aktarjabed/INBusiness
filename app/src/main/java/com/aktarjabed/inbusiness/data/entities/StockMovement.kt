@@ -26,7 +26,7 @@ data class StockMovement(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0,
     @ColumnInfo(name = "businessId")
-    val businessId: Long,
+    val businessId: String,
     @ColumnInfo(name = "productId")
     val productId: Long,
     @ColumnInfo(name = "movementType")
