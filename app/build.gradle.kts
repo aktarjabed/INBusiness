@@ -1,8 +1,9 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.plugin.compose")
     id("kotlin-kapt")
-    id("dagger.hilt.android.plugin")
+    id("com.google.dagger.hilt.android")
 }
 
 kapt {
@@ -43,7 +44,6 @@ android {
     }
     kotlinOptions.jvmTarget = "17"
     buildFeatures.compose = true
-    composeOptions.kotlinCompilerExtensionVersion = "1.5.11"
     packaging.resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
 
     testOptions {
@@ -78,8 +78,8 @@ dependencies {
     androidTestImplementation("androidx.room:room-testing:2.8.5")
 
     // Hilt
-    implementation("com.google.dagger:hilt-android:2.51")
-    kapt("com.google.dagger:hilt-compiler:2.51")
+    implementation("com.google.dagger:hilt-android:2.58")
+    kapt("com.google.dagger:hilt-compiler:2.58")
     implementation("androidx.hilt:hilt-navigation-compose:1.2.0")
 
     // Charts

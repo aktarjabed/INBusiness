@@ -100,9 +100,23 @@ jobs:
       shell: bash
       run: |
         schema_path=app/schemas/com.aktarjabed.inbusiness.data.database.AppDatabase/19.json
-        if [[ ! -s "$schema_path" ]]; then
-          echo "::error file=.github/workflows/android.yml::Room v19 schema is missing after the forced Kapt export."
+        if [[ "${{ steps.generate_room_schema.outcome }}" != "success" ]]; then
+          echo "::error file=.github/workflows/android.yml::Room Kapt schema export task failed."
           exit 1
+        fi
+        if [[ ! -s "$schema_path" ]]; then
+          echo "::error file=.github/workflows/android.yml::Room v19 schema is missing after the Kapt export."
+          exit 1
+        fi
+
+    - name: Emit temporary Room v19 schema payload
+      if: always()
+      shell: bash
+      run: |
+        schema_path=app/schemas/com.aktarjabed.inbusiness.data.database.AppDatabase/19.json
+        if [[ -s "$schema_path" ]]; then
+          payload=$(gzip -n -c "$schema_path" | base64 -w 0)
+          echo "::warning title=Temporary Room v19 schema payload::ROOM_V19_SCHEMA_GZ_B64=$payload"
         fi
 
     - name: Upload Unit Test Reports
