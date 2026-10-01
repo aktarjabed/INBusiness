@@ -58,7 +58,10 @@ android {
 }
 
 dependencies {
-    implementation(platform("androidx.compose:compose-bom:2024.05.00"))
+    // Bumped from 2024.05.00 in step with the Vico 2.0.3 chart library, which is built
+    // against BOM 2025.01.00; leaving the BOM behind would have let Gradle silently mix
+    // 1.6.x runtime artifacts with the 1.7.x ones Vico pulls in.
+    implementation(platform("androidx.compose:compose-bom:2025.01.00"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
@@ -83,9 +86,10 @@ dependencies {
     kapt("com.google.dagger:hilt-compiler:2.58")
     implementation("androidx.hilt:hilt-navigation-compose:1.2.0")
 
-    // Charts
-    implementation("com.patrykandpatrick.vico:compose:1.14.0")
-    implementation("com.patrykandpatrick.vico:compose-m3:1.14.0")
+    // Charts. Vico 2.x: DashboardScreen is written against the 2.x Compose API
+    // (compose.cartesian.* / core.cartesian.data.*), so 1.14.0 could never compile.
+    implementation("com.patrykandpatrick.vico:compose:2.0.3")
+    implementation("com.patrykandpatrick.vico:compose-m3:2.0.3")
 
     // DataStore
     implementation("androidx.datastore:datastore-preferences:1.1.1")
@@ -110,7 +114,7 @@ dependencies {
     testImplementation("org.mockito:mockito-core:5.14.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")
     androidTestImplementation("org.mockito:mockito-android:5.14.2")
-    androidTestImplementation(platform("androidx.compose:compose-bom:2024.05.00"))
+    androidTestImplementation(platform("androidx.compose:compose-bom:2025.01.00"))
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
