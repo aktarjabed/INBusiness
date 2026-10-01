@@ -107,15 +107,30 @@ dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
 
     // Testing
-    // Mockito 5 defaults to the inline mock maker, which is required to mock the final
-    // Kotlin classes used by the tests (QuotaGate, BusinessContext, DeviceClassifier).
-    // With Mockito 4 those mocks fail at runtime.
+    // Mockito 5's inline mock maker runs on the JVM, where mocking Kotlin final classes works
+    // (see QuotaGateTest). On-device the subclass mock maker is used and cannot do this.
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.mockito:mockito-core:5.14.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")
-    androidTestImplementation("org.mockito:mockito-android:5.14.2")
+    // No Mockito here on purpose: the Android runner uses Dexmaker's subclass mock maker, which
+    // cannot mock final Kotlin classes, so any instrumented mock of QuotaGate/DeviceClassifier
+    // fails in @Before. Instrumented tests use the real collaborators instead.
     androidTestImplementation(platform("androidx.compose:compose-bom:2025.01.00"))
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
+}
+
+// androidx.room:room-migration:2.8.5 declares kotlinx-serialization-json:1.8.1, but its bundled
+// migration serializers (`FieldBundle$$serializer` and friends) are compiled against 1.7.x. In
+// 1.8.0 `GeneratedSerializer` gained an abstract `typeParametersSerializers()`, so resolving 1.8.x
+// makes Room's serializers throw `AbstractMethodError` when `MigrationTestHelper` reads an exported
+// schema bundle - every migration test crashes. Pinning to the version Room was actually built
+// against restores those serializers; nothing in this app uses kotlinx-serialization directly, and
+// the only other consumer (navigation-common 2.8.9) declares 1.6.3.
+configurations.configureEach {
+    resolutionStrategy {
+        force("org.jetbrains.kotlinx:kotlinx-serialization-core:1.7.3")
+        force("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+    }
 }

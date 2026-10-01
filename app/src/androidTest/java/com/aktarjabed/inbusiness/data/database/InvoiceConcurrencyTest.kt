@@ -18,16 +18,15 @@ import com.aktarjabed.inbusiness.domain.context.BusinessContext
 import com.aktarjabed.inbusiness.domain.invoice.CalculateInvoiceTotalsUseCase
 import com.aktarjabed.inbusiness.domain.invoice.InvoiceCreationResult
 import com.aktarjabed.inbusiness.domain.invoice.SupplyType
+import com.aktarjabed.inbusiness.domain.device.DeviceClassifier
 import com.aktarjabed.inbusiness.domain.quota.QuotaGate
-import com.aktarjabed.inbusiness.domain.quota.QuotaVerdict
+import com.aktarjabed.inbusiness.util.SystemClock
 import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.flowOf
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.mockito.Mockito.*
 import java.util.Collections
 
 @RunWith(AndroidJUnit4::class)
@@ -40,8 +39,8 @@ class InvoiceConcurrencyTest {
     private lateinit var businessDao: BusinessDao
     private lateinit var productDao: ProductDao
 
-    private lateinit var mockBusinessContext: BusinessContext
-    private lateinit var mockQuotaGate: QuotaGate
+    private lateinit var businessContext: BusinessContext
+    private lateinit var quotaGate: QuotaGate
 
     private lateinit var repository: InvoiceRepository
 
@@ -61,15 +60,19 @@ class InvoiceConcurrencyTest {
         businessDao = db.businessDao()
         productDao = db.productDao()
 
-        mockBusinessContext = BusinessContext(ApplicationProvider.getApplicationContext())
+        businessContext = BusinessContext(ApplicationProvider.getApplicationContext())
         runBlocking {
-            mockBusinessContext.setActiveBusinessId(BIZ_ID)
-            mockBusinessContext.setUserId(USER_ID)
+            businessContext.setActiveBusinessId(BIZ_ID)
+            businessContext.setUserId(USER_ID)
         }
 
 
 
-        mockQuotaGate = mock(QuotaGate::class.java)
+        // Real gate: `mock(QuotaGate::class.java)` cannot work here - QuotaGate is final and
+        // the Android runner's Dexmaker subclass mock maker refuses final classes, so it threw
+        // in @Before and failed every test in the class. Quota behaviour is controlled through
+        // the quota row instead (see useUnboundedQuota()).
+        quotaGate = QuotaGate(db.userQuotaDao(), DeviceClassifier(), SystemClock(), context)
 
         repository = InvoiceRepository(
             database = db,
@@ -79,8 +82,8 @@ class InvoiceConcurrencyTest {
             productDao = productDao,
             businessDao = businessDao,
             calculateInvoiceTotalsUseCase = calcUseCase,
-            quotaGate = mockQuotaGate,
-            businessContext = mockBusinessContext
+            quotaGate = quotaGate,
+            businessContext = businessContext
         )
 
         runBlocking {
@@ -100,10 +103,31 @@ class InvoiceConcurrencyTest {
         db.close()
     }
 
+    /**
+     * Unbounded allowance (PRO: [Int.MAX_VALUE] daily/monthly, no free-tier expiry) so a test can
+     * exercise business logic without quota caps interfering. The counters stay real -
+     * `createInvoice` consumes them through the same SQL path as production.
+     */
+    private suspend fun useUnboundedQuota() {
+        db.userQuotaDao().insertIfAbsent(
+            UserQuotaEntity(
+                userId = USER_ID,
+                tier = "PRO",
+                dailyUsed = 0,
+                monthlyUsed = 0,
+                lastResetEpochDay = SystemClock().todayEpochDay(),
+                lastMonthlyResetEpochDay = SystemClock().monthStartEpochDay(),
+                watermark = false,
+                retentionDays = 30,
+                freeExpiryEpochDay = null
+            )
+        )
+    }
+
     @Test
     fun testSequenceConcurrency() = runBlocking {
+        useUnboundedQuota()
         // Given allowed quota
-        `when`(mockQuotaGate.assertQuota(anyString(), anyBoolean())).thenReturn(QuotaVerdict.Allowed(100))
 
         val items = listOf(InvoiceItem(description = "Item", quantity = 1.0, pricePerUnit = 100.0, gstPercentage = 5.0))
 
@@ -139,7 +163,7 @@ class InvoiceConcurrencyTest {
 
     @Test
     fun testIdempotencyExactMatch() = runBlocking {
-        `when`(mockQuotaGate.assertQuota(anyString(), anyBoolean())).thenReturn(QuotaVerdict.Allowed(100))
+        useUnboundedQuota()
 
         val items = listOf(InvoiceItem(description = "Item", quantity = 1.0, pricePerUnit = 100.0, gstPercentage = 5.0))
         val idempotencyKey = "fixed-key"
@@ -173,7 +197,7 @@ class InvoiceConcurrencyTest {
 
     @Test
     fun testIdempotencyFingerprintConflict() = runBlocking {
-        `when`(mockQuotaGate.assertQuota(anyString(), anyBoolean())).thenReturn(QuotaVerdict.Allowed(100))
+        useUnboundedQuota()
 
         val idempotencyKey = "conflict-key"
 
@@ -206,7 +230,7 @@ class InvoiceConcurrencyTest {
 
     @Test
     fun testMultiTenantIdempotency() = runBlocking {
-        `when`(mockQuotaGate.assertQuota(anyString(), anyBoolean())).thenReturn(QuotaVerdict.Allowed(100))
+        useUnboundedQuota()
 
         val biz2Id = "biz-2"
         businessDao.insertBusinessData(
@@ -223,8 +247,8 @@ class InvoiceConcurrencyTest {
         )
         assertTrue(res1 is InvoiceCreationResult.Success)
 
-        // Switch context to Biz 2
-        `when`(mockBusinessContext.activeBusinessId).thenReturn(flowOf(biz2Id))
+        // Switch context to Biz 2 (real DataStore-backed context).
+        businessContext.setActiveBusinessId(biz2Id)
 
         // Create in Biz 2 with same key
         val res2 = repository.createInvoice(
@@ -245,7 +269,7 @@ class InvoiceConcurrencyTest {
 
         val realRepo = InvoiceRepository(
             database = db, invoiceDao = invoiceDao, paymentDao = paymentDao, stockMovementDao = stockMovementDao, productDao = productDao, businessDao = businessDao,
-            calculateInvoiceTotalsUseCase = calcUseCase, quotaGate = realQuotaGate, businessContext = mockBusinessContext
+            calculateInvoiceTotalsUseCase = calcUseCase, quotaGate = realQuotaGate, businessContext = businessContext
         )
 
         db.userQuotaDao().insertIfAbsent(
@@ -291,7 +315,7 @@ class InvoiceConcurrencyTest {
 
         val realRepo = InvoiceRepository(
             database = db, invoiceDao = invoiceDao, paymentDao = paymentDao, stockMovementDao = stockMovementDao, productDao = productDao, businessDao = businessDao,
-            calculateInvoiceTotalsUseCase = calcUseCase, quotaGate = realQuotaGate, businessContext = mockBusinessContext
+            calculateInvoiceTotalsUseCase = calcUseCase, quotaGate = realQuotaGate, businessContext = businessContext
         )
 
         // Force daily limit very high, but monthly at 59 (cap is 60)
@@ -332,7 +356,7 @@ class InvoiceConcurrencyTest {
 
         val realRepo = InvoiceRepository(
             database = db, invoiceDao = invoiceDao, paymentDao = paymentDao, stockMovementDao = stockMovementDao, productDao = productDao, businessDao = businessDao,
-            calculateInvoiceTotalsUseCase = calcUseCase, quotaGate = realQuotaGate, businessContext = mockBusinessContext
+            calculateInvoiceTotalsUseCase = calcUseCase, quotaGate = realQuotaGate, businessContext = businessContext
         )
 
         db.userQuotaDao().insertIfAbsent(
