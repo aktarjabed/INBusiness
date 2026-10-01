@@ -45,6 +45,13 @@ class InvoicePreviewViewModel @Inject constructor(
     private val _recordPaymentState = MutableStateFlow<RecordPaymentUiState>(RecordPaymentUiState.Idle)
     val recordPaymentState: StateFlow<RecordPaymentUiState> = _recordPaymentState.asStateFlow()
 
+    /**
+     * Payments are not keyed by an idempotency token, so a double tap must not be able to
+     * post the same amount twice. The dialog disables its button, but the state update is
+     * asynchronous, hence this guard.
+     */
+    private var paymentInFlight = false
+
     init {
         viewModelScope.launch { loadInvoice() }
     }
@@ -68,12 +75,15 @@ class InvoicePreviewViewModel @Inject constructor(
     }
 
     fun recordPayment(amount: Double, paymentMode: String) {
+        if (paymentInFlight) return
+
         val currentInvoice = (_uiState.value as? InvoicePreviewUiState.Success)?.invoice
         if (currentInvoice == null) {
             _recordPaymentState.value = RecordPaymentUiState.Error("Invoice is not ready")
             return
         }
 
+        paymentInFlight = true
         viewModelScope.launch {
             _recordPaymentState.value = RecordPaymentUiState.Saving
             try {
@@ -93,6 +103,8 @@ class InvoicePreviewViewModel @Inject constructor(
                 _recordPaymentState.value = RecordPaymentUiState.Error(
                     e.message ?: "Could not record payment"
                 )
+            } finally {
+                paymentInFlight = false
             }
         }
     }

@@ -5,8 +5,25 @@ on:
     branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
+  workflow_dispatch:
 
 jobs:
+  dependency-review:
+    name: Dependency Vulnerability Review
+    runs-on: ubuntu-latest
+    # Only pull requests have a dependency diff to review.
+    if: github.event_name == 'pull_request'
+    steps:
+    - uses: actions/checkout@v4
+
+    # Reported as a check but non-blocking until the repository dependency graph is
+    # confirmed to be enabled; remove `continue-on-error` to make it a hard gate.
+    - name: Review dependency changes for known vulnerabilities
+      continue-on-error: true
+      uses: actions/dependency-review-action@v4
+      with:
+        fail-on-severity: high
+
   build:
     name: Build, Lint & Unit Tests
     runs-on: ubuntu-latest

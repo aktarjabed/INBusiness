@@ -147,8 +147,15 @@ class InvoiceRepository @Inject constructor(
                 }
 
                 val invoiceId = UUID.randomUUID().toString()
+                // Timestamps are captured once so the invoice header, its payment entry and
+                // the stock movements cannot disagree by a few milliseconds.
+                val now = Instant.now()
+
                 // 3. Stock Deductions for linked products
-                for (item in items) {
+                // Iterating the *processed* items guarantees that only lines that passed
+                // validation can move stock, and that the numbers written to the ledger are
+                // the same ones persisted on the invoice.
+                for (item in calcResult.processedItems) {
                     if (item.productId != null) {
                         val product = productDao.getProductById(item.productId, businessId)
                             ?: throw TransactionAbortException(InvoiceCreationResult.ProductNotFound(item.productId))
@@ -217,8 +224,8 @@ class InvoiceRepository @Inject constructor(
                     amountPaid = calcResult.amountPaid,
                     balanceDue = calcResult.balanceDue,
                     paymentMethod = effectivePaymentMethod,
-                    createdAt = Instant.now(),
-                    updatedAt = Instant.now()
+                    createdAt = now,
+                    updatedAt = now
                 )
 
                 val updatedItems = calcResult.processedItems.map {
@@ -239,7 +246,7 @@ class InvoiceRepository @Inject constructor(
                             invoiceId = invoiceId,
                             amount = calcResult.amountPaid,
                             paymentMode = effectivePaymentMethod,
-                            paymentDate = System.currentTimeMillis()
+                            paymentDate = now.toEpochMilli()
                         )
                     )
                 }
@@ -297,29 +304,40 @@ class InvoiceRepository @Inject constructor(
                     )
                 }
 
-                invoiceDao.updateInvoice(invoice.copy(status = "CANCELLED", updatedAt = Instant.now()))
-
                 val items = invoiceDao.getInvoiceItems(invoiceId, businessId)
-                for (item in items) {
-                    if (item.productId != null) {
-                        val product = productDao.getProductById(item.productId, businessId)
-                        if (product != null) {
-                            productDao.addStock(item.productId, businessId, item.quantity)
-                            stockMovementDao.insertMovement(
-                                com.aktarjabed.inbusiness.data.entities.StockMovement(
-                                    businessId = businessId,
-                                    productId = item.productId,
-                                    movementType = "SALE_REVERSAL",
-                                    quantity = item.quantity,
-                                    stockBefore = product.availableStock,
-                                    stockAfter = product.availableStock + item.quantity,
-                                    referenceType = "INVOICE",
-                                    referenceId = invoiceId,
-                                    reason = "Invoice cancelled"
+
+                // Validate the whole reversal before mutating anything: skipping a missing
+                // product would cancel the invoice while leaving its stock deducted, which
+                // silently corrupts inventory. Aborting rolls the transaction back instead.
+                val linkedProducts = items.mapNotNull { item ->
+                    item.productId?.let { productId ->
+                        val product = productDao.getProductById(productId, businessId)
+                            ?: throw TransactionAbortException(
+                                InvoiceCreationResult.InvalidRequest(
+                                    "Cannot cancel: product $productId referenced by this invoice no longer exists"
                                 )
                             )
-                        }
+                        item to product
                     }
+                }
+
+                invoiceDao.updateInvoice(invoice.copy(status = "CANCELLED", updatedAt = Instant.now()))
+
+                for ((item, product) in linkedProducts) {
+                    productDao.addStock(product.id, businessId, item.quantity)
+                    stockMovementDao.insertMovement(
+                        com.aktarjabed.inbusiness.data.entities.StockMovement(
+                            businessId = businessId,
+                            productId = product.id,
+                            movementType = "SALE_REVERSAL",
+                            quantity = item.quantity,
+                            stockBefore = product.availableStock,
+                            stockAfter = product.availableStock + item.quantity,
+                            referenceType = "INVOICE",
+                            referenceId = invoiceId,
+                            reason = "Invoice cancelled"
+                        )
+                    )
                 }
                 invoice.invoiceNumber
             }

@@ -63,7 +63,8 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
-    implementation("androidx.navigation:navigation-compose:2.8.0-beta01")
+    // Stable release: the previous 2.8.0-beta01 was a beta in a production path.
+    implementation("androidx.navigation:navigation-compose:2.8.9")
 
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.0")
@@ -102,10 +103,13 @@ dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
 
     // Testing
+    // Mockito 5 defaults to the inline mock maker, which is required to mock the final
+    // Kotlin classes used by the tests (QuotaGate, BusinessContext, DeviceClassifier).
+    // With Mockito 4 those mocks fail at runtime.
     testImplementation("junit:junit:4.13.2")
-    testImplementation("org.mockito:mockito-core:4.11.0")
+    testImplementation("org.mockito:mockito-core:5.14.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")
-    androidTestImplementation("org.mockito:mockito-android:4.11.0")
+    androidTestImplementation("org.mockito:mockito-android:5.14.2")
     androidTestImplementation(platform("androidx.compose:compose-bom:2024.05.00"))
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
     debugImplementation("androidx.compose.ui:ui-tooling")

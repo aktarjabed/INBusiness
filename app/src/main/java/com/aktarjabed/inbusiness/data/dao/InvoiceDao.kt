@@ -54,12 +54,6 @@ interface InvoiceDao {
     @Update
     suspend fun updateInvoice(invoice: Invoice)
 
-    @Query("SELECT * FROM invoices WHERE businessId = :businessId AND (invoiceNumber LIKE '%' || :query || '%' OR customerName LIKE '%' || :query || '%')")
-    fun searchInvoices(businessId: String, query: String): Flow<List<Invoice>>
-
-    @Query("SELECT * FROM invoices WHERE businessId = :businessId ORDER BY createdAt DESC LIMIT :limit")
-    suspend fun getRecentInvoicesByBusiness(businessId: String, limit: Int): List<Invoice>
-
     @RawQuery
     suspend fun getInvoicesByQuery(query: androidx.sqlite.db.SupportSQLiteQuery): List<Invoice>
 
@@ -69,9 +63,10 @@ interface InvoiceDao {
     @Query("UPDATE invoice_sequence SET lastSequenceNumber = lastSequenceNumber + 1 WHERE businessId = :businessId")
     suspend fun incrementSequence(businessId: String): Int
 
+    /**
+     * Creates the per-business counter row if it is missing. IGNORE (never REPLACE) is
+     * essential: blindly upserting the sequence would let invoice numbers be reused.
+     */
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertSequence(sequence: InvoiceSequence): Long
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertOrUpdateSequence(sequence: InvoiceSequence)
 }

@@ -1,7 +1,6 @@
 package com.aktarjabed.inbusiness.data.dao
 
 import androidx.sqlite.db.SimpleSQLiteQuery
-import androidx.sqlite.db.SupportSQLiteQuery
 
 data class InvoiceHistoryFilter(
     val businessId: String,
@@ -14,7 +13,13 @@ data class InvoiceHistoryFilter(
     val limit: Int = 50,
     val offset: Int = 0
 ) {
-    fun toSQLiteQuery(): SupportSQLiteQuery {
+    /**
+     * Builds the raw history query.
+     *
+     * The concrete [SimpleSQLiteQuery] type is returned (rather than the interface) so that
+     * tests can assert on both the SQL text and the bind arguments.
+     */
+    fun toSQLiteQuery(): SimpleSQLiteQuery {
         var queryString = "SELECT * FROM invoices WHERE businessId = ?"
         val bindArgs = mutableListOf<Any>(businessId)
 

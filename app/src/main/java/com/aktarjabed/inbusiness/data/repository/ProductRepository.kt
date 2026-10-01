@@ -185,9 +185,25 @@ class ProductRepository @Inject constructor(
         }
     }
 
+    /**
+     * Deletes a product that has no ledger history.
+     *
+     * Products referenced by `stock_movements` are protected by a RESTRICT foreign key:
+     * removing them would break the double-entry inventory ledger, so they must be kept.
+     * The raw SQLite failure is translated into an actionable message instead of a
+     * generic constraint error.
+     */
     suspend fun deleteProduct(productId: Long) {
         val businessId = businessContext.activeBusinessId.first()
-        val rowsAffected = productDao.deleteProduct(productId, businessId)
+        val rowsAffected = try {
+            productDao.deleteProduct(productId, businessId)
+        } catch (e: android.database.sqlite.SQLiteConstraintException) {
+            throw IllegalStateException(
+                "This product has stock movement history and cannot be deleted. " +
+                    "Set its stock to zero instead so the inventory ledger stays consistent.",
+                e
+            )
+        }
         if (rowsAffected == 0) {
             throw IllegalStateException("Failed to delete product. It may not exist or belongs to another business.")
         }

@@ -1,5 +1,6 @@
 package com.aktarjabed.inbusiness.presentation.viewmodel
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.aktarjabed.inbusiness.data.entities.Product
@@ -10,7 +11,6 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import javax.inject.Inject
-import kotlin.coroutines.cancellation.CancellationException
 
 sealed class SaveProductState {
     object Idle : SaveProductState()
@@ -70,7 +70,6 @@ class ProductViewModel @Inject constructor(
                 _editingProduct.value = product
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
-                if (e is CancellationException) throw e
                 // Handle error softly
             }
         }
@@ -112,7 +111,6 @@ class ProductViewModel @Inject constructor(
                 _saveState.value = SaveProductState.Success
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
-                if (e is CancellationException) throw e
                 _saveState.value = SaveProductState.Error(e.message ?: "Failed to save product")
             }
         }
@@ -124,8 +122,14 @@ class ProductViewModel @Inject constructor(
                 productRepository.deleteProduct(productId)
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
-                if (e is CancellationException) throw e
+                // Previously swallowed: a blocked delete (ledger history) looked like a no-op.
+                Log.e(TAG, "Failed to delete product $productId: ${e.message}", e)
+                _saveState.value = SaveProductState.Error(e.message ?: "Failed to delete product")
             }
         }
+    }
+
+    companion object {
+        private const val TAG = "ProductViewModel"
     }
 }

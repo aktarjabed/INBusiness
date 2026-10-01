@@ -3,14 +3,19 @@ package com.aktarjabed.inbusiness.domain.usecase
 import com.aktarjabed.inbusiness.data.entities.InvoiceItem
 import com.aktarjabed.inbusiness.data.repository.InvoiceRepository
 import com.aktarjabed.inbusiness.domain.invoice.InvoiceCreationResult
-import com.aktarjabed.inbusiness.domain.context.BusinessContext
 import com.aktarjabed.inbusiness.domain.invoice.SupplyType
-import kotlinx.coroutines.flow.first
 import javax.inject.Inject
 
+/**
+ * Thin entry point for invoice creation.
+ *
+ * Validation, quota consumption, sequence allocation, stock deduction, payment
+ * recording and idempotency all happen atomically inside
+ * [InvoiceRepository.createInvoice]; this class only keeps the presentation layer
+ * decoupled from the repository.
+ */
 class CreateInvoiceUseCase @Inject constructor(
-    private val invoiceRepository: InvoiceRepository,
-    private val businessContext: BusinessContext
+    private val invoiceRepository: InvoiceRepository
 ) {
     suspend operator fun invoke(
         customerName: String,

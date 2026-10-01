@@ -26,7 +26,7 @@ class BusinessRepository @Inject constructor(private val dao: BusinessDao) {
             if (e is kotlinx.coroutines.CancellationException) throw e
             Result.failure(e)
         }
-            .onFailure { Log.e(TAG, "getBusinessDataById: \${it.message}", it) }
+            .onFailure { Log.e(TAG, "getBusinessDataById failed: ${it.message}", it) }
             .getOrNull()
 
     suspend fun saveBusinessData(data: BusinessData) =
@@ -36,7 +36,7 @@ class BusinessRepository @Inject constructor(private val dao: BusinessDao) {
             if (e is kotlinx.coroutines.CancellationException) throw e
             Result.failure(e)
         }
-            .onFailure { Log.e(TAG, "saveBusinessData: \${it.message}", it) }
+            .onFailure { Log.e(TAG, "saveBusinessData failed: ${it.message}", it) }
 
     suspend fun deleteBusinessData(data: BusinessData) =
         try {
@@ -45,7 +45,7 @@ class BusinessRepository @Inject constructor(private val dao: BusinessDao) {
             if (e is kotlinx.coroutines.CancellationException) throw e
             Result.failure(e)
         }
-            .onFailure { Log.e(TAG, "deleteBusinessData: \${it.message}", it) }
+            .onFailure { Log.e(TAG, "deleteBusinessData failed: ${it.message}", it) }
 
     fun getCalculationResults(businessDataId: String): Flow<List<CalculationResult>> =
         dao.getCalculationResults(businessDataId)
@@ -57,7 +57,7 @@ class BusinessRepository @Inject constructor(private val dao: BusinessDao) {
             if (e is kotlinx.coroutines.CancellationException) throw e
             Result.failure(e)
         }
-            .onFailure { Log.e(TAG, "saveCalculationResult: \${it.message}", it) }
+            .onFailure { Log.e(TAG, "saveCalculationResult failed: ${it.message}", it) }
 
     suspend fun deleteAllCalculationResults(businessId: String) =
         try {
@@ -66,7 +66,7 @@ class BusinessRepository @Inject constructor(private val dao: BusinessDao) {
             if (e is kotlinx.coroutines.CancellationException) throw e
             Result.failure(e)
         }
-            .onFailure { Log.e(TAG, "deleteAllCalculationResults: \${it.message}", it) }
+            .onFailure { Log.e(TAG, "deleteAllCalculationResults failed: ${it.message}", it) }
 
     /* ============== Business AI-safe calculator ============== */
     fun calculateFinancialMetrics(data: BusinessData): FinancialMetrics {
@@ -143,7 +143,7 @@ class BusinessRepository @Inject constructor(private val dao: BusinessDao) {
             )
         } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
-            Log.e(TAG, "Calculation error: \${e.message}", e)
+            Log.e(TAG, "Calculation error: ${e.message}", e)
             FinancialMetrics() // safe fallback
         }
     }

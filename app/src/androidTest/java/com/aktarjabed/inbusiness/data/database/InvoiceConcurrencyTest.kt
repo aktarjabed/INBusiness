@@ -241,7 +241,7 @@ class InvoiceConcurrencyTest {
         // Mock a strict quota logic for testing since we can't test SQL atomic quota update here directly using QuotaGate (it is mocked)
         // Wait, the prompt says "Concurrent requests pushed at the exact daily cap -> usage never exceeds the cap limit."
         // Let's actually use the real QuotaGate and UserDao to prove the SQL atomicity!
-        val realQuotaGate = QuotaGate(db.userQuotaDao(), mock(com.aktarjabed.inbusiness.domain.device.DeviceClassifier::class.java), com.aktarjabed.inbusiness.util.SystemClock(), ApplicationProvider.getApplicationContext())
+        val realQuotaGate = QuotaGate(db.userQuotaDao(), com.aktarjabed.inbusiness.domain.device.DeviceClassifier(), com.aktarjabed.inbusiness.util.SystemClock(), ApplicationProvider.getApplicationContext())
 
         val realRepo = InvoiceRepository(
             database = db, invoiceDao = invoiceDao, paymentDao = paymentDao, stockMovementDao = stockMovementDao, productDao = productDao, businessDao = businessDao,
@@ -287,7 +287,7 @@ class InvoiceConcurrencyTest {
     @Test
     fun testMonthlyQuotaCap() = runBlocking {
         val items = listOf(InvoiceItem(description = "Item", quantity = 1.0, pricePerUnit = 100.0, gstPercentage = 5.0))
-        val realQuotaGate = QuotaGate(db.userQuotaDao(), mock(com.aktarjabed.inbusiness.domain.device.DeviceClassifier::class.java), com.aktarjabed.inbusiness.util.SystemClock(), ApplicationProvider.getApplicationContext())
+        val realQuotaGate = QuotaGate(db.userQuotaDao(), com.aktarjabed.inbusiness.domain.device.DeviceClassifier(), com.aktarjabed.inbusiness.util.SystemClock(), ApplicationProvider.getApplicationContext())
 
         val realRepo = InvoiceRepository(
             database = db, invoiceDao = invoiceDao, paymentDao = paymentDao, stockMovementDao = stockMovementDao, productDao = productDao, businessDao = businessDao,
@@ -328,7 +328,7 @@ class InvoiceConcurrencyTest {
 
     @Test
     fun testAtomicRollback() = runBlocking {
-        val realQuotaGate = QuotaGate(db.userQuotaDao(), mock(com.aktarjabed.inbusiness.domain.device.DeviceClassifier::class.java), com.aktarjabed.inbusiness.util.SystemClock(), ApplicationProvider.getApplicationContext())
+        val realQuotaGate = QuotaGate(db.userQuotaDao(), com.aktarjabed.inbusiness.domain.device.DeviceClassifier(), com.aktarjabed.inbusiness.util.SystemClock(), ApplicationProvider.getApplicationContext())
 
         val realRepo = InvoiceRepository(
             database = db, invoiceDao = invoiceDao, paymentDao = paymentDao, stockMovementDao = stockMovementDao, productDao = productDao, businessDao = businessDao,

@@ -5,6 +5,7 @@ import android.util.Log
 import com.aktarjabed.inbusiness.data.dao.UserQuotaDao
 import com.aktarjabed.inbusiness.data.entities.UserQuotaEntity
 import com.aktarjabed.inbusiness.domain.device.DeviceClassifier
+import com.aktarjabed.inbusiness.domain.device.DeviceTier
 import com.aktarjabed.inbusiness.util.SystemClock
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -38,8 +39,10 @@ class QuotaGate @Inject constructor(
         if (consume) {
             val rows = dao.consumeQuotaAtomic(userId, today, monthStart, dailyCap, monthlyCap)
             if (rows > 0) {
-                val freshEntity = dao.getQuota(userId)!!
-                return QuotaVerdict.Allowed(dailyCap - freshEntity.dailyUsed)
+                // Re-read the persisted counters; the row is guaranteed to exist because the
+                // UPDATE above succeeded, but never assume it (a concurrent reset must not crash).
+                val freshEntity = dao.getQuota(userId) ?: entity
+                return QuotaVerdict.Allowed(remainingAfter(freshEntity.dailyUsed, dailyCap))
             } else {
                 val status = dao.getQuotaStatus(userId, today, monthStart, dailyCap, monthlyCap)
                 if (status == "MONTHLY_EXCEEDED" || status == "BOTH_EXCEEDED") {
@@ -60,13 +63,20 @@ class QuotaGate @Inject constructor(
                 return QuotaVerdict.DailyCap(dailyCap)
             } else {
                 val peekEntity = dao.getQuota(userId) ?: entity
-                return QuotaVerdict.Allowed(dailyCap - peekEntity.dailyUsed)
+                return QuotaVerdict.Allowed(remainingAfter(peekEntity.dailyUsed, dailyCap))
             }
         }
     }
 
+    /** Remaining invoices for today, clamped to zero so the UI never shows a negative count. */
+    private fun remainingAfter(used: Int, dailyCap: Int): Int =
+        (dailyCap - used).coerceAtLeast(0)
+
     private suspend fun createFirstQuota(userId: String, today: Long): UserQuotaEntity {
-        val deviceTier = deviceClassifier.getDeviceTier(context)
+        // A failed/absent classifier must not be able to break invoice creation: fall back
+        // to the most conservative tier instead of dereferencing a null.
+        val deviceTier = runCatching { deviceClassifier.getDeviceTier(context) }
+            .getOrDefault(DeviceTier.LOW_END)
 
         val entity = UserQuotaEntity(
             userId = userId,

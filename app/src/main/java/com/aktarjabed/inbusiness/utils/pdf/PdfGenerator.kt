@@ -6,6 +6,7 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Typeface
 import android.graphics.pdf.PdfDocument
+import android.util.Log
 
 import com.aktarjabed.inbusiness.data.entities.Invoice
 import com.aktarjabed.inbusiness.data.entities.InvoiceItem
@@ -18,6 +19,7 @@ import java.util.Locale
 class PdfGenerator(private val context: Context) {
 
     companion object {
+        private const val TAG = "PdfGenerator"
         private const val PAGE_WIDTH = 595 // A4 Width in PostScript points
         private const val PAGE_HEIGHT = 842 // A4 Height
         private const val MARGIN = 40f
@@ -78,17 +80,38 @@ class PdfGenerator(private val context: Context) {
             yPosition = drawTableHeader(canvas, yPosition)
 
             // Paginate even when a single item description wraps across multiple lines/pages.
+            var truncated = false
             for (item in items) {
-                val descriptionLines = wrapDescription(item.description, 190f)
+                if (truncated) break
+                // Bound the rendered text: PdfDocument holds every page in memory, so an
+                // accidentally pasted megabyte-long description must not be able to
+                // exhaust the heap.
+                val description = item.description.take(PdfConstants.MAX_DESCRIPTION_CHARS)
+                val descriptionLines = wrapDescription(description, 190f)
                 var firstLine = true
                 for (line in descriptionLines) {
                     if (yPosition + 20f > PAGE_HEIGHT - MARGIN - 100f) {
+                        if (pageNumber >= PdfConstants.MAX_PAGES) {
+                            truncated = true
+                            break
+                        }
                         yPosition = startNewPage(includeTableHeader = true)
                     }
                     drawItemLine(canvas, item, line, yPosition, firstLine)
                     yPosition += 20f
                     firstLine = false
                 }
+            }
+
+            if (truncated) {
+                // Never silently drop line items from a financial document.
+                canvas.drawText(
+                    "NOTE: item details were truncated (document too large). See the app for the full invoice.",
+                    MARGIN,
+                    yPosition,
+                    smallTextPaint
+                )
+                yPosition += 20f
             }
 
             // Draw line after items
@@ -128,8 +151,12 @@ class PdfGenerator(private val context: Context) {
             // Save to FileProvider cache directory
             val cachePath = File(context.cacheDir, "invoices")
             cachePath.mkdirs()
-            // Ensure unique filename to prevent overwrite
-            val file = File(cachePath, "Invoice_${invoice.invoiceNumber}_${System.currentTimeMillis()}.pdf")
+            // Keep the cache bounded before adding another generated document.
+            PdfCacheManager.prune(cachePath)
+            // Ensure unique filename to prevent overwrite. The invoice number is used in a
+            // file name, so strip anything that could escape the cache directory.
+            val safeNumber = invoice.invoiceNumber.replace(Regex("[^A-Za-z0-9._-]"), "_").take(64)
+            val file = File(cachePath, "Invoice_${safeNumber}_${System.currentTimeMillis()}.pdf")
 
             outputFile = file
             FileOutputStream(file).use { outputStream ->
@@ -138,7 +165,7 @@ class PdfGenerator(private val context: Context) {
             return file
         } catch (e: Exception) {
             outputFile?.delete()
-            e.printStackTrace()
+            Log.e(TAG, "Failed to generate invoice PDF", e)
             return null
         } finally {
             pdfDocument.close()

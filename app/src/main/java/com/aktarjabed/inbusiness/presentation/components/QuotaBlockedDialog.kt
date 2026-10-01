@@ -109,6 +109,8 @@ private fun UpgradeOptions() {
             fontWeight = FontWeight.SemiBold
         )
 
+        // Only capability claims that the app actually implements are listed here.
+        // Live IRP/IRN submission is explicitly out of scope (see README).
         PricingCard(
             tier = "Basic",
             price = "₹99/month",
@@ -119,15 +121,21 @@ private fun UpgradeOptions() {
         PricingCard(
             tier = "Pro",
             price = "₹149/month",
-            features = "AI + Security + IRN",
+            features = "Unlimited invoices, priority support",
             highlighted = true
         )
 
         PricingCard(
             tier = "Enterprise",
             price = "₹499/month",
-            features = "Teams + API",
+            features = "Unlimited invoices, priority support",
             highlighted = false
+        )
+
+        Text(
+            text = "In-app purchases are not enabled in this build.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
 }

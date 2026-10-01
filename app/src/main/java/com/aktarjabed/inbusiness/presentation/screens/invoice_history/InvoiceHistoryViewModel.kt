@@ -45,6 +45,14 @@ class InvoiceHistoryViewModel @Inject constructor(
     private var activeLoad: Job? = null
     private var pendingSearch: Job? = null
 
+    /**
+     * Monotonic request id. A cancelled load may still be between its last suspension
+     * point and its state update, so results are only applied when the id still matches
+     * the newest request. Without this a slow "all invoices" page could be appended on
+     * top of a fast "search results" page (or vice versa).
+     */
+    private var requestGeneration = 0L
+
     init {
         loadInvoices(reset = true)
     }
@@ -104,6 +112,7 @@ class InvoiceHistoryViewModel @Inject constructor(
 
         val requestOffset = currentOffset
         val requestState = _uiState.value
+        val requestId = if (reset) ++requestGeneration else requestGeneration
         activeLoad = viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
             try {
@@ -122,6 +131,7 @@ class InvoiceHistoryViewModel @Inject constructor(
                 )
 
                 currentCoroutineContext().ensureActive()
+                if (requestId != requestGeneration) return@launch
                 _uiState.update {
                     it.copy(
                         invoices = if (reset) newInvoices else it.invoices + newInvoices,
@@ -133,6 +143,7 @@ class InvoiceHistoryViewModel @Inject constructor(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
+                if (requestId != requestGeneration) return@launch
                 _uiState.update { it.copy(error = e.message, isLoading = false) }
             }
         }

@@ -70,7 +70,20 @@ class InvoiceViewModel @Inject constructor(
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
+    /**
+     * Idempotency key for the *current* submission attempt.
+     *
+     * It is intentionally reused while the payload is unchanged so that a retry of
+     * the exact same invoice cannot create a duplicate. As soon as any input that
+     * feeds the request fingerprint changes, the key is discarded: reusing a key
+     * with a different payload is a hard validation error
+     * ("Idempotency key reused for a different payload") which would otherwise
+     * permanently block the user from saving an edited invoice.
+     */
     private var currentIdempotencyKey: String? = null
+
+    /** Guards against double-tap submissions before the UI state flips to Loading. */
+    private var invoiceCreationInFlight = false
 
     init {
         // Load product suggestions for autocomplete
@@ -135,13 +148,18 @@ class InvoiceViewModel @Inject constructor(
     }
 
     fun updateCustomerData(name: String, gstin: String, address: String) {
+        // GSTINs are case-insensitive; normalize so supply-type detection (which is
+        // case-sensitive) does not fail for pasted lowercase values.
+        val normalizedGstin = gstin.trim().uppercase()
+
         customerName.value = name
-        customerGSTIN.value = gstin
+        customerGSTIN.value = normalizedGstin
         buyerAddress.value = address
+        invalidatePendingIdempotencyKey()
 
         // Auto-detect supply type
-        if (sellerGstin.value.isNotBlank() && gstin.isNotBlank()) {
-            supplyType.value = determineSupplyTypeUseCase(sellerGstin.value, gstin)
+        if (sellerGstin.value.isNotBlank() && normalizedGstin.isNotBlank()) {
+            supplyType.value = determineSupplyTypeUseCase(sellerGstin.value, normalizedGstin)
         }
         recalculateItems()
     }
@@ -150,15 +168,20 @@ class InvoiceViewModel @Inject constructor(
     fun setAmountPaid(amount: Double) {
         val normalized = if (amount.isFinite()) java.math.BigDecimal(amount.toString()).setScale(2, java.math.RoundingMode.HALF_UP).toDouble() else 0.0
         amountPaid.value = normalized
+        invalidatePendingIdempotencyKey()
         recalculateItems()
     }
 
     fun setPaymentMethod(method: String) {
+        if (paymentMethod.value != method) {
+            invalidatePendingIdempotencyKey()
+        }
         paymentMethod.value = method
     }
 
     fun setSupplyType(type: SupplyType) {
         supplyType.value = type
+        invalidatePendingIdempotencyKey()
         recalculateItems()
     }
 
@@ -177,6 +200,7 @@ class InvoiceViewModel @Inject constructor(
         }
         editingItemIndex = null
         _invoiceItems.value = currentItems
+        invalidatePendingIdempotencyKey()
         recalculateItems()
     }
 
@@ -185,8 +209,17 @@ class InvoiceViewModel @Inject constructor(
         if (index in currentItems.indices) {
             currentItems.removeAt(index)
             _invoiceItems.value = currentItems
+            invalidatePendingIdempotencyKey()
             recalculateItems()
         }
+    }
+
+    /**
+     * Drops the pending idempotency key. Called whenever the request payload changes so a
+     * follow-up submission is treated as a new request instead of a conflicting replay.
+     */
+    private fun invalidatePendingIdempotencyKey() {
+        currentIdempotencyKey = null
     }
 
     private fun recalculateItems() {
@@ -238,29 +271,49 @@ class InvoiceViewModel @Inject constructor(
     }
 
     fun createInvoice() {
+        if (invoiceCreationInFlight) return
+        invoiceCreationInFlight = true
+
         viewModelScope.launch {
-            val validInputs = _invoiceItems.value.filter { input ->
-                val isBlank = input.description.isBlank() && input.quantity == 0.0 && input.pricePerUnit == 0.0 && input.gstPercentage == 0.0
-                if (!isBlank && (input.description.isBlank() || input.quantity <= 0 || input.pricePerUnit < 0 || input.gstPercentage < 0)) {
-                    _uiState.value = InvoiceUiState.Error("Partially filled or invalid item found")
+            try {
+                val validInputs = _invoiceItems.value.filter { input ->
+                    val isBlank = input.description.isBlank() && input.quantity == 0.0 && input.pricePerUnit == 0.0 && input.gstPercentage == 0.0
+                    if (!isBlank && (input.description.isBlank() || input.quantity <= 0 || input.pricePerUnit < 0 || input.gstPercentage < 0)) {
+                        _uiState.value = InvoiceUiState.Error("Partially filled or invalid item found")
+                        return@launch
+                    }
+                    !isBlank
+                }
+                if (validInputs.isEmpty()) {
+                    _uiState.value = InvoiceUiState.Error("Please add at least one item")
                     return@launch
                 }
-                !isBlank
-            }
-            if (validInputs.isEmpty()) {
-                _uiState.value = InvoiceUiState.Error("Please add at least one item")
-                return@launch
-            }
 
-            if (supplyType.value == SupplyType.UNKNOWN) {
-                _uiState.value = InvoiceUiState.Error("Please select a valid Supply Type (Intra/Inter State)")
-                return@launch
-            }
+                if (customerName.value.isBlank()) {
+                    _uiState.value = InvoiceUiState.Error("Please enter the customer name")
+                    return@launch
+                }
 
-            _uiState.value = InvoiceUiState.Loading
+                if (customerGSTIN.value.isNotBlank() &&
+                    !com.aktarjabed.inbusiness.domain.invoice.GstCalculator.isValidGstin(customerGSTIN.value)
+                ) {
+                    _uiState.value = InvoiceUiState.Error(
+                        "Customer GSTIN '${customerGSTIN.value}' is not a valid GSTIN. Correct it or clear the field for an unregistered buyer."
+                    )
+                    return@launch
+                }
 
-            try {
-                val idempotencyKey = currentIdempotencyKey ?: java.util.UUID.randomUUID().toString().also { currentIdempotencyKey = it }
+                if (supplyType.value == SupplyType.UNKNOWN) {
+                    _uiState.value = InvoiceUiState.Error(
+                        "Supply type could not be determined. Select Intra-state or Inter-state, or add valid GSTINs."
+                    )
+                    return@launch
+                }
+
+                _uiState.value = InvoiceUiState.Loading
+
+                val idempotencyKey = currentIdempotencyKey
+                    ?: java.util.UUID.randomUUID().toString().also { currentIdempotencyKey = it }
 
                 val rawItems = validInputs.map { input ->
                     InvoiceItem(
@@ -286,25 +339,35 @@ class InvoiceViewModel @Inject constructor(
 
                 when(result) {
                     is InvoiceCreationResult.Success -> {
+                        // The request is persisted and confirmed; a subsequent submission is a
+                        // genuinely new invoice and must not reuse this key.
+                        invalidatePendingIdempotencyKey()
                         _uiState.value = InvoiceUiState.Success(
                             invoiceId = result.invoiceId,
                             message = "Invoice ${result.invoiceNumber} created successfully"
                         )
                     }
                     is InvoiceCreationResult.IdempotentReplay -> {
+                        invalidatePendingIdempotencyKey()
                          _uiState.value = InvoiceUiState.Success(
                             invoiceId = result.invoiceId,
                             message = "Invoice already created"
                         )
                     }
                     is InvoiceCreationResult.QuotaExceeded -> {
-                         _uiState.value = InvoiceUiState.Error("Quota Exceeded") // Using Error for now
+                        // "Quota Exceeded" alone gives the user nothing to act on; state which
+                        // limit was hit and that the day/month rolls over automatically.
+                        _uiState.value = InvoiceUiState.Error(
+                            "Invoice limit reached for this period. Your free daily/monthly " +
+                                "allowance resets automatically - try again after the reset, " +
+                                "or upgrade for unlimited invoices."
+                        )
                     }
                     is InvoiceCreationResult.InsufficientStock -> {
                          _uiState.value = InvoiceUiState.Error("Insufficient stock for ${result.productName}. Requested: ${result.requested}, Available: ${result.available}")
                     }
                     is InvoiceCreationResult.ProductNotFound -> {
-                        _uiState.value = InvoiceUiState.Error("Product not found")
+                         _uiState.value = InvoiceUiState.Error("Product not found")
                     }
                     is InvoiceCreationResult.InvalidRequest -> {
                         _uiState.value = InvoiceUiState.Error(result.message)
@@ -317,12 +380,15 @@ class InvoiceViewModel @Inject constructor(
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 Log.e(TAG, "Error creating invoice", e)
                 _uiState.value = InvoiceUiState.Error("Failed to create invoice: ${e.message}")
+            } finally {
+                invoiceCreationInFlight = false
             }
         }
     }
 
     fun resetState() {
         _uiState.value = InvoiceUiState.Initial
+        invalidatePendingIdempotencyKey()
     }
 
     fun clearError() {

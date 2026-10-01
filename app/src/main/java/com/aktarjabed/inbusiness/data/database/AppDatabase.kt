@@ -57,8 +57,12 @@ abstract class AppDatabase : RoomDatabase() {
 
         val MIGRATION_3_4 = object : Migration(3, 4) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                // Ensure foreign keys are turned off during migration
+                // Room runs migrations inside a transaction, where `PRAGMA foreign_keys`
+                // is a silent no-op. `defer_foreign_keys` is honoured inside a
+                // transaction and postpones constraint checks to COMMIT, which is what
+                // table recreation needs.
                 db.execSQL("PRAGMA foreign_keys=OFF")
+                db.execSQL("PRAGMA defer_foreign_keys=ON")
 
                 // Create the invoice sequence table
                 db.execSQL("""
@@ -143,6 +147,7 @@ abstract class AppDatabase : RoomDatabase() {
         val MIGRATION_7_8 = object : Migration(7, 8) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("PRAGMA foreign_keys=OFF")
+                db.execSQL("PRAGMA defer_foreign_keys=ON")
 
                 db.execSQL("""
                     CREATE TABLE IF NOT EXISTS `invoice_items_new` (
@@ -191,15 +196,18 @@ abstract class AppDatabase : RoomDatabase() {
 
                 // 2. Fix the sequence table name and column from migration 3->4
                 val cursor = db.query("SELECT name FROM sqlite_master WHERE type='table' AND name='invoice_sequences'")
-                if (cursor.moveToFirst()) {
-                    // Only do the renaming dance if the bad table exists
-                    db.execSQL("CREATE TABLE IF NOT EXISTS `invoice_sequence_new` (`businessId` TEXT NOT NULL, `lastSequenceNumber` INTEGER NOT NULL, PRIMARY KEY(`businessId`))")
-                    db.execSQL("INSERT INTO invoice_sequence_new (businessId, lastSequenceNumber) SELECT businessId, currentNumber FROM invoice_sequences")
-                    db.execSQL("DROP TABLE invoice_sequences")
-                    db.execSQL("DROP TABLE IF EXISTS invoice_sequence")
-                    db.execSQL("ALTER TABLE invoice_sequence_new RENAME TO invoice_sequence")
+                try {
+                    if (cursor.moveToFirst()) {
+                        // Only do the renaming dance if the bad table exists
+                        db.execSQL("CREATE TABLE IF NOT EXISTS `invoice_sequence_new` (`businessId` TEXT NOT NULL, `lastSequenceNumber` INTEGER NOT NULL, PRIMARY KEY(`businessId`))")
+                        db.execSQL("INSERT INTO invoice_sequence_new (businessId, lastSequenceNumber) SELECT businessId, currentNumber FROM invoice_sequences")
+                        db.execSQL("DROP TABLE invoice_sequences")
+                        db.execSQL("DROP TABLE IF EXISTS invoice_sequence")
+                        db.execSQL("ALTER TABLE invoice_sequence_new RENAME TO invoice_sequence")
+                    }
+                } finally {
+                    cursor.close()
                 }
-                cursor.close()
             }
         }
 
@@ -291,6 +299,10 @@ abstract class AppDatabase : RoomDatabase() {
         val MIGRATION_18_19 = object : Migration(18, 19) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("PRAGMA foreign_keys=OFF")
+                // Recreating three tables while their FKs exist; defer the checks to
+                // COMMIT. Orphaned legacy rows still fail the migration (and must be
+                // fixed), but valid data is no longer rejected mid-swap.
+                db.execSQL("PRAGMA defer_foreign_keys=ON")
 
                 // 1. stock_movements: recreate with TEXT businessId
                 db.execSQL("CREATE TABLE `stock_movements_new` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `businessId` TEXT NOT NULL, `productId` INTEGER NOT NULL, `movementType` TEXT NOT NULL, `quantity` REAL NOT NULL, `stockBefore` REAL NOT NULL, `stockAfter` REAL NOT NULL, `referenceType` TEXT NOT NULL, `referenceId` TEXT NOT NULL, `reason` TEXT NOT NULL DEFAULT '', `createdAt` INTEGER NOT NULL, FOREIGN KEY(`productId`) REFERENCES `products`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT)")
