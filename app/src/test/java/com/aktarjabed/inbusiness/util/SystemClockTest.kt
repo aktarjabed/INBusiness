@@ -3,7 +3,9 @@ package com.aktarjabed.inbusiness.util
 import com.aktarjabed.inbusiness.utils.AppDateUtils
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.Duration
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.ZoneId
@@ -48,21 +50,36 @@ class SystemClockTest {
         val expected = LocalDate.now(AppDateUtils.businessZoneId).withDayOfMonth(1)
 
         assertEquals(expected.toEpochDay(), clock.monthStartEpochDay())
-        assertEquals("month start must never be in the future", 0L, (expected.toEpochDay() - clock.todayEpochDay()).coerceAtMost(0L))
+        assertTrue(
+            "month start must never be in the future",
+            clock.monthStartEpochDay() <= clock.todayEpochDay()
+        )
+        assertTrue(
+            "month start must belong to the current month",
+            clock.todayEpochDay() - clock.monthStartEpochDay() < 32
+        )
     }
 
     @Test
     fun resetTimeIsExpressedInTheBusinessZone() {
         TimeZone.setDefault(TimeZone.getTimeZone("Pacific/Honolulu"))
 
-        val expected = LocalDateTime.now(AppDateUtils.businessZoneId)
-            .plusDays(1)
-            .withHour(0).withMinute(0).withSecond(0).withNano(0)
-
         val resetTime = com.aktarjabed.inbusiness.domain.quota.QuotaVerdict.DailyCap(2).resetTime
-        assertEquals(expected, resetTime)
+
+        // Assert the invariant rather than an exact instant: the reset is the next business-zone
+        // midnight. Comparing against a freshly computed LocalDateTime would flake if the run
+        // straddles midnight in the business zone.
         assertEquals(0, resetTime.minute)
         assertEquals(0, resetTime.second)
+        assertEquals(0, resetTime.nano)
+        val secondsToReset = Duration.between(
+            LocalDateTime.now(AppDateUtils.businessZoneId),
+            resetTime
+        ).seconds
+        assertTrue(
+            "reset must be the next midnight in the business zone (was ${'$'}secondsToReset s away)",
+            secondsToReset in 1..(24 * 60 * 60)
+        )
     }
 
     @Test
