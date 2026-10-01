@@ -43,14 +43,17 @@ jobs:
       shell: bash
       run: |
         set -o pipefail
-        ./gradlew :app:kaptDebugKotlin --rerun-tasks --no-build-cache --stacktrace --console=plain 2>&1 | tee room-schema.log
+        ./gradlew clean :app:kaptDebugKotlin --no-build-cache --stacktrace --console=plain 2>&1 | tee room-schema.log
 
     - name: Report Room schema generation failure
       if: steps.generate_room_schema.outcome == 'failure'
       shell: bash
       run: |
-        tail -n 40 room-schema.log
-        summary=$(tail -n 30 room-schema.log | sed -e 's/%/%25/g' -e 's/\r/%0D/g' | paste -sd ' ' -)
+        details=$(grep -E '(^FAILURE:|^\* What went wrong:|^Execution failed|^> |^Caused by:|^e: |^error:)' room-schema.log | tail -n 25 || true)
+        if [[ -z "$details" ]]; then
+          details=$(tail -n 20 room-schema.log)
+        fi
+        summary=$(printf '%s\n' "$details" | sed -e 's/%/%25/g' -e 's/\r/%0D/g' | paste -sd ' ' -)
         echo "::error title=Room schema generation diagnostics::$summary"
 
     - name: Upload Room schema generation diagnostics
