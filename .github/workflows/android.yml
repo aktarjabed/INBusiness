@@ -126,6 +126,7 @@ jobs:
         files = sorted(glob.glob('app/build/test-results/testDebugUnitTest/TEST-*.xml'))
         total = failures = errors = skipped = 0
         failing = []
+        classes = set()
         for path in files:
             root = ET.parse(path).getroot()
             total += int(root.get('tests', 0) or 0)
@@ -133,6 +134,8 @@ jobs:
             errors += int(root.get('errors', 0) or 0)
             skipped += int(root.get('skipped', 0) or 0)
             for case in root.iter('testcase'):
+                if case.get('classname'):
+                    classes.add(case.get('classname'))
                 for bad in list(case.iter('failure')) + list(case.iter('error')):
                     message = ' '.join((bad.get('message') or bad.text or '').split())
                     failing.append(f"{case.get('classname')}.{case.get('name')}: {message[:200]}")
@@ -296,6 +299,18 @@ jobs:
         sudo udevadm control --reload-rules
         sudo udevadm trigger --name-match=kvm
 
+    - name: Resolve instrumented dependency versions
+      shell: bash
+      run: |
+        ./gradlew :app:dependencyInsight --dependency kotlinx-serialization-core \
+          --configuration debugAndroidTestRuntimeClasspath --console=plain 2>/dev/null \
+          | grep -E "kotlinx-serialization-core:[0-9]" | sort -u | head -n 5 > serialization-versions.txt || true
+        if [[ -s serialization-versions.txt ]]; then
+          echo "::notice title=Instrumented kotlinx-serialization-core::$(paste -sd '; ' serialization-versions.txt)"
+        else
+          echo "::notice title=Instrumented kotlinx-serialization-core::dependencyInsight produced no match"
+        fi
+
     - name: Run Instrumented Tests
       uses: reactivecircus/android-emulator-runner@v2
       with:
@@ -334,9 +349,9 @@ jobs:
 
         for entry in failing[:25]:
             print(f"::error title=Failing instrumented test::{entry}")
-        print(f"Instrumented tests: {total} cases in {len(files)} classes "
+        print(f"Instrumented tests: {total} cases in {len(classes)} classes "
               f"({failures} failures, {errors} errors, {skipped} skipped)")
-        print(f"::notice title=Instrumented tests executed::{total} cases in {len(files)} classes, "
+        print(f"::notice title=Instrumented tests executed::{total} cases in {len(classes)} classes, "
               f"{failures} failures, {errors} errors, {skipped} skipped")
         if total == 0:
             sys.exit('::error title=Instrumented test verification failed::zero test cases executed')

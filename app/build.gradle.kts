@@ -90,7 +90,16 @@ dependencies {
     implementation("androidx.room:room-runtime:2.8.5")
     implementation("androidx.room:room-ktx:2.8.5")
     kapt("androidx.room:room-compiler:2.8.5")
-    androidTestImplementation("androidx.room:room-testing:2.8.5")
+    // Room's migration serializers are compiled against kotlinx-serialization 1.7.x, while
+    // room-migration's POM asks for 1.8.1 (whose GeneratedSerializer adds an abstract
+    // typeParametersSerializers()). Excluding it here and pinning 1.7.3 below is deterministic,
+    // unlike relying on resolution order. See the note at the bottom of this file.
+    androidTestImplementation("androidx.room:room-testing:2.8.5") {
+        exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-serialization-core")
+        exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-serialization-json")
+    }
+    androidTestImplementation("org.jetbrains.kotlinx:kotlinx-serialization-core:1.7.3")
+    androidTestImplementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
 
     // Hilt
     implementation("com.google.dagger:hilt-android:2.58")
@@ -140,12 +149,12 @@ dependencies {
 // against restores those serializers; nothing in this app uses kotlinx-serialization directly, and
 // the only other consumer (navigation-common 2.8.9) declares 1.6.3.
 configurations.configureEach {
-    // Annotation-processor/kapt classpaths are deliberately excluded: Room's schema-export code
-    // runs there and is sensitive to exactly which serialization classes it loads (see the kapt
-    // block above). Forcing versions into those classpaths is what broke `:app:kaptDebugKotlin`,
-    // so this pin covers only the app's compile/runtime/test classpaths - where the mismatch
-    // actually surfaced as an AbstractMethodError inside MigrationTestHelper.
-    if (!name.contains("kapt", ignoreCase = true) &&
+    // Scoped to the instrumented classpaths, which are the only ones that load
+    // androidx.room:room-testing. Annotation-processor/kapt classpaths are deliberately untouched:
+    // forcing versions there is what broke `:app:kaptDebugKotlin` (Room's schema export runs on
+    // that classpath and deserializes existing snapshots with whatever serialization it finds).
+    if (name.contains("AndroidTest", ignoreCase = true) &&
+        !name.contains("kapt", ignoreCase = true) &&
         !name.contains("annotationProcessor", ignoreCase = true)
     ) {
         resolutionStrategy {
