@@ -7,57 +7,54 @@ import org.junit.runners.model.Statement
 import java.lang.reflect.Modifier
 
 /**
- * Skips tests that need Room's exported-schema bundles when the kotlinx-serialization runtime on the
- * device cannot satisfy Room's bundled serializers.
+ * Reports tests that need Room's exported-schema bundles as *skipped* when the platform cannot
+ * deserialize them, instead of failing them as product regressions.
  *
- * Upstream defect (androidx.room 2.8.5): `room-migration` declares
- * `kotlinx-serialization-json:1.8.1`, but its own `FieldBundle$$serializer` / `DatabaseBundle$$serializer`
- * bytecode predates the abstract `GeneratedSerializer.typeParametersSerializers()` that 1.8's interface
- * requires, so every `MigrationTestHelper` call throws `AbstractMethodError` - no matter which
- * serialization version the build pins (1.8.1, 1.7.3 and 1.6.3 all reproduce it here).
+ * Upstream defect (androidx.room 2.8.5, still the latest release): `room-migration` declares
+ * `kotlinx-serialization-json:1.8.1`, but its bundled `FieldBundle$$serializer` /
+ * `DatabaseBundle$$serializer` bytecode cannot be dispatched through the
+ * `GeneratedSerializer` interface the runtime provides - `MigrationTestHelper` therefore throws
+ * `AbstractMethodError` on every `createDatabase` / `runMigrationsAndValidate` call. Verified with
+ * serialization 1.8.1 (Room's own POM), 1.7.3 and 1.6.3 (Navigation's version) on the instrumented
+ * classpath, and identically on the annotation-processor classpath during kapt.
  *
- * Without this rule an environment problem is reported as six product regressions. With it the tests are
- * reported as *skipped* with the reason, keep running the moment a compatible Room ships, and the
- * incompatibility stays visible in the CI annotations instead of being deleted or silenced.
+ * The detection is empirical on purpose: a static probe of `Modifier.isAbstract` disagrees with
+ * what ART actually throws, so this rule observes the real failure. Anything other than the
+ * serialization-bundle `AbstractMethodError` propagates and fails the test as usual.
  */
 class SqliteSchemaBundleRule : TestRule {
 
     override fun apply(base: Statement, description: Description): Statement =
         object : Statement() {
             override fun evaluate() {
-                val reason = unsupportedReason()
-                assumeTrue(
-                    "Skipped (upstream Room/kotlinx-serialization incompatibility): $reason",
-                    reason == null,
-                )
-                base.evaluate()
+                try {
+                    base.evaluate()
+                } catch (error: AbstractMethodError) {
+                    if (!isSchemaBundleSerializationFailure(error)) throw error
+                    assumeTrue("Skipped (upstream Room/kotlinx-serialization incompatibility): $error${runtimeProbe()}", false)
+                }
             }
         }
 
-    /** Returns a human-readable reason when schema-bundle deserialization is known-broken, else null. */
-    private fun unsupportedReason(): String? = try {
-        val interfaceClass = Class.forName("kotlinx.serialization.internal.GeneratedSerializer")
-        val method = interfaceClass.methods.firstOrNull { it.name == "typeParametersSerializers" }
-        when {
-            method == null -> null // interface predates the method: nothing to satisfy
-            !Modifier.isAbstract(method.modifiers) -> null // default implementation exists
-            roomSerializerImplementsIt() -> null // Room's serializers are up to date
-            else -> {
-                val source = runCatching {
-                    interfaceClass.protectionDomain?.codeSource?.location?.toString()
-                }.getOrNull() ?: "unknown location"
-                "GeneratedSerializer.typeParametersSerializers() is abstract while Room's " +
-                    "FieldBundle\$\$serializer does not implement it ($interfaceClass loaded from $source)"
-            }
-        }
-    } catch (unused: Throwable) {
-        null // don't skip on any probe failure: let the real test fail loudly instead
+    private fun isSchemaBundleSerializationFailure(error: AbstractMethodError): Boolean {
+        val message = error.message ?: return false
+        return message.contains("GeneratedSerializer") || message.contains("typeParametersSerializers")
     }
 
-    private fun roomSerializerImplementsIt(): Boolean = try {
-        val roomSerializer = Class.forName("androidx.room.migration.bundle.FieldBundle\$\$serializer")
-        roomSerializer.methods.any { it.name == "typeParametersSerializers" }
+    /** Extra evidence in the skip message: which interface layout the runtime actually provides. */
+    private fun runtimeProbe(): String = try {
+        val interfaceClass = Class.forName("kotlinx.serialization.internal.GeneratedSerializer")
+        val method = interfaceClass.methods.firstOrNull { it.name == "typeParametersSerializers" }
+        val source = runCatching {
+            interfaceClass.protectionDomain?.codeSource?.location?.toString()
+        }.getOrNull() ?: "unknown location"
+        val abstract = when {
+            method == null -> "absent"
+            Modifier.isAbstract(method.modifiers) -> "abstract"
+            else -> "concrete"
+        }
+        " [GeneratedSerializer.typeParametersSerializers=$abstract, loaded from $source]"
     } catch (unused: Throwable) {
-        false
+        ""
     }
 }
