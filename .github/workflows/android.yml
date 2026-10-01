@@ -51,7 +51,17 @@ jobs:
         fi
 
     - name: Run Android Lint
-      run: ./gradlew lintDebug
+      run: ./gradlew lintDebug --stacktrace --console=plain 2>&1 | tee lint.log
+
+    - name: Report lint failure details
+      if: failure()
+      shell: bash
+      run: |
+        if [[ -f lint.log ]]; then
+          tail -n 40 lint.log
+          summary=$(tail -n 30 lint.log | sed -e 's/%/%25/g' -e 's/\r/%0D/g' | paste -sd ' ' -)
+          echo "::error title=Android lint diagnostics::$summary"
+        fi
 
     - name: Upload Unit Test Reports
       if: always()
