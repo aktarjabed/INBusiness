@@ -5,44 +5,75 @@
 **Health.** INBusiness is a single-module Android/Kotlin app (Jetpack Compose + Room/SQLCipher +
 Hilt, ~10.9k Kotlin LOC across 105 files) implementing an offline invoicing, stock and payment
 ledger. Repo-level hygiene was good (no hardcoded secrets, tenant scoping in SQL, non-destructive
-migrations), but the code carried several build-blocking, integrity-threatening and
-correctness defects. The most serious were an unsatisfiable Hilt graph, an unusable
-backup/restore policy, idempotency-key handling that could permanently block invoice saving,
-and a payment path with no double-submit protection.
+migrations), but the code carried several build-blocking, integrity-threatening and correctness
+defects. Three of them were only discovered once the repository's CI was made trustworthy, because
+that CI had been reporting success for builds that failed:
 
-**Release readiness.** *Not release-ready in this sandbox, for one specific reason: nothing can be
-compiled or executed here.* The environment has no JDK, no Gradle cache, no Android SDK and no
-outbound network (module downloads and `apt` both fail), so `./gradlew assembleDebug`,
-`testDebugUnitTest`, `lintDebug` and the instrumented suite were impossible to run. Every change
-below is therefore **inspection-verified only** and must be confirmed by CI before a release
-decision. Assuming CI is green, the app moves from "several known-broken paths" to "one
-known-untested data migration (18→19) plus documented follow-ups".
+1. **The CI signal was false.** Every Gradle step piped through `tee` under `bash -e` (no
+   `pipefail`), so a non-zero Gradle exit was swallowed and a failing build reported success. The
+   first "green" run of this branch was a false green. With the mask removed, the real state was:
+   `compileDebugKotlin` failed on `DashboardScreen`, whose imports are written against the Vico
+   **2.x** Compose API while the build pinned **1.14.0**, plus two imports
+   (`core.cartesian.formatter.CartesianValueFormatter`, and `rememberBottom`/`rememberStart`
+   used as bare names) that do not resolve in any released Vico version.
+2. **The instrumented suite could not be compiled at all** — `DatabaseMigrationTest.readString`
+   had a block body with no `return`, so `compileDebugAndroidTestKotlin` failed. Once that was
+   fixed and the suite ran for the first time, 13 tests failed for two further reasons: mocking a
+   final Kotlin class (`QuotaGate`) on-device, and an upstream Room ↔ `kotlinx-serialization`
+   binary clash that breaks every `MigrationTestHelper` test.
+3. **Everything else the earlier inspection found** (unsatisfiable Hilt graph, unusable backup
+   policy, idempotency key that could permanently block invoice saving, unguarded payment
+   double-submit, cancellation leaving stock deducted, quota/timezone bugs) was fixed in the same
+   pass and is listed below.
+
+**Release readiness.** *Build, unit tests and lint are genuinely green; the instrumented suite is
+one unverified fix away.* CI run `36891885134` (commit `a8e88f5`) reports `Build with Gradle`
+success, `Verify unit tests actually executed` success with **71 test cases in 12 classes,
+0 failures, 0 errors, 0 skipped**, `Run Android Lint` success with the HTML report verified, and
+the Room v19 schema regenerated and validated. CI run `36893477785` (commit `8a68a98`) shows the
+emulator job compiling and *executing* the instrumented suite for the first time; it reported 13
+failures with exactly two error signatures (`Cannot mock/spy ... final class` across all 7
+`InvoiceConcurrencyTest` tests, `AbstractMethodError ... typeParametersSerializers()` across the
+`MigrationTestHelper` suites), both addressed in the final local commit. **Do not cut a release
+until the emulator job is green.**
 
 **Top risks (residual).**
-1. `MIGRATION_18_19` recreates `stock_movements`, `payments` and `customers` while casting
+1. The fixes in the final local commit (`1aa8e14`: serialization pin, real-collaborator
+   `InvoiceConcurrencyTest`) have not been re-run — GitHub authentication in this environment
+   expired mid-session, so that commit is committed locally but **not pushed**.
+2. `MIGRATION_18_19` recreates `stock_movements`, `payments` and `customers` while casting
    `businessId` INTEGER→TEXT; the transformation is plausible but has never been proven to
-   preserve rows on a real pre-19 database (P0 to verify with an instrumented test).
-2. Room schema export drift: `app/schemas` contains v5–13 and 18–19; versions 14–17 are missing,
-   so only the pinned v19 CI check protects the schema.
-3. Missing index on `invoices(businessId, createdAt)`; history/dashboard reads will degrade with
-   data volume and the fix needs a schema bump.
-4. No static-analysis gate (detekt/ktlint) and the instrumented migration/concurrency suites are
-   the only protection for the ledger invariants.
+   preserve rows on a real pre-19 database (P0).
+3. The concurrency and migration suites only started executing in this pass: latent
+   ledger-invariant failures may still surface once they run end-to-end for the first time.
+4. Missing index on `invoices(businessId, createdAt)`; no static-analysis gate; quota caps and
+   pricing hardcoded (documented in the UI).
 
 **Top fixes.**
-1. Deleted the duplicate Hilt bindings (`AppModule`) that made the Dagger graph unsatisfiable.
-2. Rebuilt the backup/restore policy: `allowBackup=false` plus full-domain exclusions for cloud
-   backup *and* device transfer, with a regression test.
-3. Hardened the invoice submission path: idempotency key invalidated on every payload change,
-   cleared on success, double-submit guarded, GSTIN validated before submission.
-4. Made the money/ledger paths safe: payment double-tap guard, legacy-ledger repair, atomic
-   exactly-once cancellation, business-timezone quota windows, bounded PDF cache.
-5. Added 7 JVM regression suites (≈740 new test lines) and a CI dependency-vulnerability job.
+1. **CI can no longer lie.** `--no-build-cache` on test/lint/connected tasks, verification steps
+   that parse the JUnit XML and lint HTML, fail when a required suite did not actually run, and
+   `::error`/`::notice` annotations that name every failing test and report executed case counts.
+   This is what exposed findings 1–3.
+2. **The app compiles again.** Vico pinned to the stable 2.x release whose API the screen uses
+   (chosen by checking every symbol against the upstream release sources), the two dead imports
+   corrected, the Compose BOM aligned with the library's own build.
+3. **The instrumented suite compiles and runs.** Missing `return` fixed; no on-device mocking of
+   final classes (real `QuotaGate` and real `BusinessContext` instead, with a PRO-tier quota row
+   when a test needs headroom); Room's migration serializers pinned to the version they were
+   compiled against.
+4. **Money/ledger correctness.** Payment double-submit guard, legacy-ledger repair, atomic
+   exactly-once cancellation, business-timezone quota windows, bounded PDF cache, GSTIN
+   validation.
+5. **Security/data safety.** `allowBackup=false` with full-domain exclusions, cleartext disabled,
+   `.gitignore` for keystores/DBs/PDFs, dead encryption layer removed.
+6. **Regression coverage.** Six new JVM suites plus expanded existing ones (830 added test lines; CI now executes **71 cases in 12 classes**), and instrumented ledger/concurrency/migration
+   suites that compile and run for the first time.
 
-**Verification status.** Cannot be executed in this environment (documented blocker, see
-*Issues Not Fixed* / *Remaining Risks*). All fixes were verified by exhaustive source inspection:
-call-site sweeps, signature/API cross-checks, import and brace-balance checks over all 105 Kotlin
-files, and XML/manifest cross-checks against the new policy tests.
+**Verification status.** *Partially by execution, partially by inspection — the distinction is
+stated per row.* Executed and green in CI: app + unit-test + lint compilation, 71 JVM test cases,
+Room v19 schema generation/validation (run `36891885134`). Executed and reported failures: the
+instrumented suite (run `36893477785`; 13 failures, fixes applied locally). Inspection-only: the
+final local commit, because GitHub authentication expired before it could be pushed and re-run.
 
 ## Issues Found
 
@@ -59,7 +90,7 @@ files, and XML/manifest cross-checks against the new policy tests.
 | H-04 | High | Concurrency / UX | `InvoiceHistoryViewModel` could apply a slow page response on top of a newer search result (no request generation). | Fixed |
 | H-05 | High | Validation / tax | Invalid or lowercase GSTINs were accepted by setup and invoicing; supply-type detection silently returned `UNKNOWN`, blocking invoices or producing a wrong tax document. | Fixed |
 | H-06 | High | Data integrity | `CalculatorViewModel` offered the live business profile as a deletable "scenario" (it lives in the same table as calculator scenarios). | Fixed |
-| H-07 | High | Tests / CI | Mockito 4 (subclass mock maker) cannot mock the final Kotlin classes used by the instrumented tests (`QuotaGate`, `DeviceClassifier`) → 4 tests fail at runtime. | Fixed |
+| H-07 | High | Tests / CI | Mockito 4 (subclass mock maker) cannot mock the final Kotlin classes used by the instrumented tests (`QuotaGate`, `DeviceClassifier`). *(Superseded by H-10: bumping Mockito does not help on-device.)* | Fixed |
 | H-08 | High | Performance / memory | `PdfDocument` keeps every page in memory and the generated-PDF cache was never pruned: a long description could exhaust the heap and the cache directory grew forever. | Fixed |
 | H-09 | High | Migrations | `PRAGMA foreign_keys=OFF` was executed inside migration transactions where SQLite silently ignores it, so the intended FK ordering was unprotected; plus a leaked `Cursor` in `MIGRATION_8_9`. | Fixed |
 | M-01 | Medium | Error handling | `ProductRepository.deleteProduct` failures (FK/ledger history) were swallowed; the UI appeared to do nothing and the DAO leaked a raw `SQLiteConstraintException`. | Fixed |
@@ -80,11 +111,17 @@ files, and XML/manifest cross-checks against the new policy tests.
 | L-06 | Low | Dead code | Unused use-case dependencies (`businessContext`, `BusinessRepository`) kept in Hilt graphs. | Fixed |
 | L-07 | Low | Tests | Misleading test name (`testRemainingCountIsNeverNegative` asserted a cap verdict, not a clamp). | Fixed |
 | I-01 | Info | Performance | No index on `invoices(businessId, createdAt)` / `status`; history and dashboard queries scan per business. | Not fixed |
-| I-02 | Info | Build | Compose BOM `2024.05.00` is much older than Kotlin 2.2.10 / AGP 8.9.1. | Not fixed |
+| I-02 | Info | Build | Compose BOM `2024.05.00` was much older than Kotlin 2.2.10 / AGP 8.9.1, and would have let Gradle silently mix 1.6.x runtime artifacts with the 1.7.x ones the chart library needs. | Fixed |
 | I-03 | Info | Tooling | No detekt/ktlint/static-analysis gate; UI strings are hardcoded instead of in `strings.xml`. | Not fixed |
 | I-04 | Info | UX | Pagination trigger derives from `listState.layoutInfo`; splash has no timeout; dashboard `combine` uses positional vararg casts. | Not fixed |
-| I-05 | Info | Migrations | Room schema snapshots for 14–17 are absent; CI pins v19 only. | Not fixed |
+| I-05 | Info | Migrations | Room schema snapshots for 14–17 are absent. Verified harmless: every `MigrationTestHelper` call uses 5, 6, 11, 12, 13 or 18 (all committed) and CI regenerates + validates v19, the only version Room checks at open time. | Not fixed |
 | I-06 | Info | Security | `FLAG_SECURE` is not set — deliberate: users need to screenshot/share invoices. Documented, not changed. | Accepted |
+| C-06 | Critical | CI / verification integrity | Every Gradle step piped through `tee` under GitHub's implicit `bash -e` (no `pipefail`), so a failing build reported success. The only green run of this branch was therefore a false green, and real regressions were invisible. | Fixed |
+| C-07 | Critical | Build | `DashboardScreen` is written against the Vico 2.x Compose API while `app/build.gradle.kts` pinned `com.patrykandpatrick.vico:compose(-m3):1.14.0` (1.x package layout); two further imports (`core.cartesian.formatter.CartesianValueFormatter`, bare `rememberBottom`/`rememberStart` extensions) resolve in no released Vico version, and two axis-component imports were unused. `compileDebugKotlin` failed — **the app did not build**. | Fixed |
+| C-08 | Critical | Build / tests | `DatabaseMigrationTest.readString` used a block body whose last statement was a discarded `db.query(sql).use { ... }` expression → `Missing return statement`, so `compileDebugAndroidTestKotlin` failed and the entire instrumented suite was unbuildable. | Fixed |
+| C-09 | Critical | Dependencies / migrations | `androidx.room:room-migration:2.8.5` declares `kotlinx-serialization-json:1.8.1` (which pulls core 1.8.1), but its bundled `FieldBundle$$serializer` bytecode implements the 1.7.x `GeneratedSerializer`; the 1.8 interface adds an abstract `typeParametersSerializers()`, so every `MigrationTestHelper` schema-bundle read threw `AbstractMethodError`. | Fixed locally (verification pending) |
+| H-10 | High | Tests / device | `mock(QuotaGate::class.java)` cannot work under the Android runner: Mockito's inline mock maker only applies on the JVM, and the on-device Dexmaker subclass mock maker refuses final Kotlin classes, so `InvoiceConcurrencyTest` failed all 7 tests in `@Before`. | Fixed locally (verification pending) |
+| L-08 | Low | Tests | (Self-inflicted, caught by CI.) `InvoiceHistoryFilterTest.alwaysScopesToTheActiveBusiness` demanded the bind list be exactly `[biz-1]`, but pagination always binds `LIMIT`/`OFFSET`; the assertion, not the code, was wrong. | Fixed |
 
 ## Issues Fixed
 
@@ -101,7 +138,7 @@ files, and XML/manifest cross-checks against the new policy tests.
 | H-04 | Monotonic `requestGeneration`; stale successes *and* failures return before touching state. | `InvoiceHistoryViewModel.kt` | Inspection + `InvoiceHistoryFilterTest` covers the filter/bind contract. |
 | H-05 | GSTIN trimmed+uppercased and validated in setup and in the invoice screen (inline error, submit disabled); `saveBusinessData` failures surface a real message and cancellation is rethrown. | `SetupViewModel.kt`, `SetupScreen.kt`, `InvoiceViewModel.kt`, `InvoiceScreen.kt` | Inspection + `GstCalculatorTest` cases for case-insensitivity, length, malformed and SQL-ish input. |
 | H-06 | Live business id is filtered out of scenarios and cannot be deleted; the screen cannot offer it. | `CalculatorViewModel.kt` | Inspection (deletion path guards on `businessContext.activeBusinessId`). |
-| H-07 | Mockito 5.14.2 (inline mock maker) for JVM + instrumented tests, with a comment; three unnecessary `mock(DeviceClassifier)` calls replaced by the real classifier on-device. | `app/build.gradle.kts`, `InvoiceConcurrencyTest.kt` | Inspection of every `mock(` site (only `QuotaGate` + abstract `Context` remain mockable-but-required). |
+| H-07 | Mockito 5.14.2 for JVM tests (where the inline mock maker works); three unnecessary `mock(DeviceClassifier)` calls replaced by the real classifier on-device. The instrumented half of this fix was wrong and is superseded by H-10 — see below. | `app/build.gradle.kts`, `InvoiceConcurrencyTest.kt` | `QuotaGateTest` runs on the JVM with the inline mock maker; on-device mocking removed entirely (H-10). |
 | H-08 | `MAX_PAGES=50`, `MAX_DESCRIPTION_CHARS=2000`, truncation notice on the document, cache pruning (newest 20 kept, >7 days evicted), sanitized file names. | `utils/pdf/PdfConstants.kt`, `PdfGenerator.kt`, `utils/pdf/PdfCacheManager.kt` (new) | New `PdfCacheManagerTest` (6 tests) over the pure pruning policy. |
 | H-09 | `PRAGMA defer_foreign_keys=ON` (the documented replacement inside a transaction) in `MIGRATION_3_4`, `7_8`, `18_19`; `MIGRATION_8_9` cursor closed in `finally`. | `data/database/AppDatabase.kt` | Inspection; existing `DatabaseMigrationTest`/`MigrationTest` cover the paths. |
 | M-01 | FK/constraint failures are mapped to an actionable `IllegalStateException`; the ViewModel logs and publishes the error. | `ProductRepository.kt`, `ProductViewModel.kt` | Inspection. |
@@ -121,17 +158,24 @@ files, and XML/manifest cross-checks against the new policy tests.
 | L-06 | Removed unused constructor dependencies; the use cases are thin passthroughs. | `CreateInvoiceUseCase.kt`, `GetInvoiceForPreviewUseCase.kt` | Grep: no remaining references to the removed parameters. |
 | L-07 | Renamed to `overUsedQuotaRowIsReportedAsDailyCapInsteadOfNegativeRemaining`. | `QuotaGateTest.kt` | Inspection. |
 | I-06 | Documented as a deliberate product decision. | `README.md`, `SECURITY.md` | — |
+| I-02 | Compose BOM raised `2024.05.00` → `2025.01.00` (app and `androidTest`) in step with Vico 2.0.3, which is built against that BOM. This prevents Gradle from resolving 1.6.x app artifacts alongside the 1.7.x Compose runtime Vico requires. | `app/build.gradle.kts` | CI run `36891885134`: `Build with Gradle`, `Run Android Lint` and the unit-test gate all green on the bumped BOM. |
+| C-06 | `--no-build-cache` on the test/lint/connected tasks; three verification steps parse the JUnit XML (`app/build/test-results/testDebugUnitTest`, `app/build/outputs/androidTest-results`) and the lint HTML, fail the job when the report is missing or a required suite did not appear, and emit `::error`/`::notice` annotations with the first error lines, executed case/class counts and every failing test's class, name and message. Report uploads use `if-no-files-found: error`; raw Gradle logs are uploaded on failure. | `.github/workflows/android.yml` | Run `36891885134`: `Verify unit tests actually executed` passed with "71 cases in 12 classes, 0 failures"; run `36893477785`: the gate failed and named the failing tests individually (the masking is gone). |
+| C-07 | Vico pinned to the stable **2.0.3** (the 2.x release built against Compose BOM 2025.01.00 / AGP 8.8, i.e. this app's toolchain generation) after verifying every symbol the screen uses against the upstream `v2.0.3` sources — `CartesianChartHost(chart, modelProducer, modifier)`, `rememberCartesianChart(vararg layers, startAxis, bottomAxis)`, `rememberColumnCartesianLayer()`, `rememberBottom`/`rememberStart(valueFormatter, tick, guideline)`, `rememberAxisGuidelineComponent(fill)`, `fill(color)`, `CartesianChartModelProducer.runTransaction { columnSeries { series(...) } }`. Fixed the two wrong imports (`CartesianValueFormatter` is in `core.cartesian.data`; the axis extensions must be imported) and removed the two unused axis-component imports. | `app/build.gradle.kts`, `presentation/screens/DashboardScreen.kt` | Run `36891885134`: `compileDebugKotlin` succeeded (`Build with Gradle` green, unit tests then executed, lint report produced). API surface checked symbol-by-symbol against the upstream `v2.0.3` sources, and 2.0.3's Compose BOM (2025.01.00) matches the bump. |
+| C-08 | Converted `readString` to an expression body (`= db.query(sql).use { ... }`) with a comment, so the cursor value is returned instead of discarded. | `app/src/androidTest/.../DatabaseMigrationTest.kt` | Run `36893477785`: `compileDebugAndroidTestKotlin` no longer fails; the job reaches `connectedDebugAndroidTest` and executes the suite. |
+| C-09 | Forced `org.jetbrains.kotlinx:kotlinx-serialization-core` and `-json` to **1.7.3** for all configurations — the serialization generation Room 2.8.5's migration serializers were actually compiled against — with a comment explaining the upstream mismatch and that nothing in this app uses kotlinx-serialization directly (the only other consumer, `navigation-common:2.8.9`, declares 1.6.3). | `app/build.gradle.kts` | Not yet verified: the CI re-run is blocked by expired GitHub authentication. Evidence: Room 2.8.5's own POM declares 1.8.1 while the `AbstractMethodError` proves its bytecode predates the 1.8 interface change. |
+| H-10 | Removed all on-device mocking from `InvoiceConcurrencyTest`: `QuotaGate` is built from the real DAO/classifier/clock; `useUnboundedQuota()` inserts a PRO row (`Int.MAX_VALUE` caps) for the isolation/concurrency tests so the free-tier cap cannot interfere while quota counters stay real; the multi-tenant test switches business through the real DataStore-backed `BusinessContext.setActiveBusinessId` instead of stubbing a property on a real object. Dropped the now-unused `mockito-android` dependency. | `app/src/androidTest/.../InvoiceConcurrencyTest.kt`, `app/build.gradle.kts` | Not yet verified (same blocker). Source-checked: no `org.mockito` reference remains under `app/src/androidTest`; `QuotaGate(dao, DeviceClassifier(), SystemClock(), context)` matches the constructor used by the already-real quota-cap tests. |
+| L-08 | Assertion corrected to require the business id first and the pagination binds to follow (`[biz-1, 50, 0]`), keeping the "always scoped" intent while asserting the real contract. | `app/src/test/.../InvoiceHistoryFilterTest.kt` | Run `36891885134`: the unit-test gate passed with 0 failures after this change. |
 
 ## Issues Not Fixed
 
 | ID | Reason not fixed | Recommended next step |
 |---|---|---|
-| **Verification blocker** | No JDK, Gradle distribution/cache, Android SDK and no network in this sandbox: `./gradlew assembleDebug`, `testDebugUnitTest`, `lintDebug`, `connectedDebugAndroidTest` and any dependency-audit command cannot run. All changes are inspection-verified. | Run the CI workflow (build + unit tests + lint + emulator suite) on this branch and treat any failure as blocking; the report's fix list is designed to be verified by that run. |
+| **GitHub authentication expired** | Mid-session the GitHub token in this environment stopped working (`gh auth status`: "the github.com token in GH_TOKEN is no longer valid"), so the final commit (`1aa8e14`) could not be pushed and CI could not be re-run for it. Build/lint/unit-test verification for the preceding commit (`a8e88f5`) is complete; the instrumented fixes (C-09, H-10) remain unverified. | Reconnect GitHub in Arena, push `arena/01a0f816-j-a-agro-inputs-and-trading`, and re-run `.github/workflows/android.yml`; the emulator job must report 0 failures/0 errors before release. The job's annotations name any failing test directly. |
+| **No local toolchain** | This sandbox has no JDK, Gradle distribution/cache or Android SDK and no outbound network, so nothing can be built or executed locally; the CI workflow is the only executable gate. | Keep CI as the acceptance gate (it now proves what it ran); optionally add a lockfile/dependency-verification step so dependency resolution drift is caught early. |
 | I-01 | Adding `Index("businessId","createdAt")` requires a schema version bump, a new exported `app/schemas/.../20.json` and a workflow update; the schema JSON cannot be generated without Room's compiler here, and a mismatched hand-written schema would fail at open time. | Add `MIGRATION_19_20` with `CREATE INDEX IF NOT EXISTS index_invoices_businessId_createdAt`, bump to v20, let kapt regenerate the schema in CI, and update the pinned schema check. |
-| I-02 | The Compose BOM governs transitive library versions; bumping it without a compile pass is a real regression risk and the BOM is already a stable release. | Bump to a BOM contemporary with Kotlin 2.2.10 in a dedicated dependency PR and run the full suite + a UI smoke test. |
 | I-03 | Adopting detekt/ktlint across 105 files would produce a very large unrelated diff and requires per-rule configuration choices. Hardcoded UI strings would need a full `strings.xml` migration and re-translation decisions. | Add detekt/ktlint with a baseline committed first (no new violations), then enable the formatter; migrate strings screen-by-screen. |
 | I-04 | Pagination and splash behaviour are timing/UI dependent; changing them without an emulator risks new scroll or navigation regressions. The pagination path is already guarded by `isLoading`/`isEndOfList`. | Replace the `layoutInfo` trigger with a threshold on the last visible index and add a splash timeout with an explicit retry state, verified on an emulator. |
-| I-05 | Schemas 14–17 cannot be regenerated here (they were never exported) and inventing them would be worse than the gap. | Regenerate the missing schemas from the migration history in a build environment and keep the v19 pin as the gate. |
+| I-05 | Schemas 14–17 were never exported and cannot be regenerated here; inventing them would be worse than the gap. Verified that nothing needs them: all `MigrationTestHelper` calls target 5/6/11/12/13/18, all of which are committed, and Room only validates the current version (19) at open time. | Regenerate the historical snapshots from the migration history in a build environment if schema-diff visibility for those versions is ever wanted; keep the v19 pin as the gate. |
 | L-05 | Cosmetic: a stored `0.0` GST renders as an empty field, which parses back to `0.0`; no data is lost and the change is purely presentational. | Show `"0"` for an explicit zero once the product form is next touched. |
 
 ## Tests Added or Improved
@@ -150,16 +194,33 @@ New JVM suites (no device required):
 | `app/src/test/.../domain/quota/QuotaGateTest.kt` (+4 tests) | Monthly cap blocks without consuming daily quota; expired free tier blocked without consumption; daily rollover restarts at 1 while monthly accumulates; over-used rows report the cap (never a negative remainder). |
 | `app/src/test/.../utils/AmountInWordsConverterTest.kt` (+3 tests) | HALF_UP paise rounding (1.005 → one paise); lakh/crore phrasing; negative/NaN/Infinity rejected. |
 
-Improved instrumented coverage:
+Improved instrumented coverage — these suites now **compile and execute** for the first time:
 
-- `PaymentRepositoryTest.repairsLegacyInvoiceSummaryWithoutLedgerRows` — new test for the
-  pre-v15 ledger repair (opening balance recorded, summary and ledger reconcile, no money lost).
-- `InvoiceConcurrencyTest` — removed three `mock(DeviceClassifier)` usages that relied on
-  final-class mocking; the real classifier is used on-device, reducing Mockito surface to the
-  one place that genuinely needs a fake (`QuotaGate`).
+- `InvoiceConcurrencyTest` — no on-device mocking at all (final Kotlin classes cannot be mocked by
+  the Android runner's subclass mock maker). `QuotaGate` is constructed from the real
+  DAO/classifier/clock, and `useUnboundedQuota()` (PRO tier, `Int.MAX_VALUE` caps) gives the
+  isolation/concurrency tests headroom while quota counters are still consumed through the real
+  SQL path. The multi-tenant test switches business through the real DataStore-backed
+  `BusinessContext`, which also exercises that switch for the first time. This directly covers
+  concurrent creation (unique invoice numbers), exact-match idempotency replay, fingerprint
+  conflicts, per-business key scoping, and the daily/monthly cap and rollback invariants.
+- `DatabaseMigrationTest` — used as the worked example for two defects: the missing `return` that
+  made the whole suite uncompilable, and the Room/serialization clash that broke schema-bundle
+  reads. Its 13→19 and 18→19 upgrade paths (schema, TEXT `businessId`, row counts, FK check) now
+  run.
+- `PaymentRepositoryTest.repairsLegacyInvoiceSummaryWithoutLedgerRows` — new test for the pre-v15
+  ledger repair (opening balance recorded, summary and ledger reconcile, no money lost).
 - Existing suites retained and cross-checked against their production counterparts:
-  `DatabaseMigrationTest`, `MigrationTest`, `ProductMigrationTest`, `FinancialAndInventoryTest`,
-  `InvoiceDaoIsolationTest`, `ProductDaoIsolationTest`, `InvoiceIdempotencyTest`.
+  `MigrationTest`, `ProductMigrationTest`, `FinancialAndInventoryTest`, `InvoiceDaoIsolationTest`,
+  `ProductDaoIsolationTest`, `InvoiceIdempotencyTest`.
+
+Test infrastructure (this is what made the above diagnosable):
+
+- The unit-test gate parses `TEST-*.xml` and fails when a required suite (BackupPolicy,
+  PdfCacheManager, InvoiceHistoryFilter, RequestFingerprint, SystemClock, AppDateUtils) did not
+  run, printing executed case/class counts; the instrumented gate does the same for
+  `connectedDebugAndroidTest`. Every failing test is emitted as an `::error` annotation with its
+  class, name and message, so a failure can be diagnosed from the checks API.
 
 ## Security Improvements
 
@@ -181,20 +242,26 @@ Improved instrumented coverage:
    `INTERNET` permission at all) and the FileProvider exposes only `cacheDir/invoices`.
 6. **Least exposure.** Deleted an unused AES-GCM `EncryptionManager` that could be mistaken for an
    active protection layer, and documented the real data-safety model in `SECURITY.md`.
-7. **Supply chain.** CI now runs a dependency-vulnerability review on pull requests.
+7. **Supply chain and verification integrity.** CI now runs a dependency-vulnerability review on
+   pull requests, and the build/test/lint gates can no longer report success for a build that
+   failed or for tests that never ran (the `tee`-without-`pipefail` mask that hid C-07/C-08 is
+   removed, and the gates now fail on missing reports). A stale or vulnerable dependency therefore
+   has to earn a red check instead of hiding behind a green one.
 8. **No secrets found.** No hardcoded credentials, tokens or keys exist in the repository; secrets
    and data artifacts are now ignored by `.gitignore`.
 
 ## Remaining Risks
 
-1. **Nothing was compiled or executed** (no JDK/SDK/network). Any typo-level mistake in this
-   changeset will surface only in CI. Highest-risk classes of change for that: the Dagger provider
-   deletion (C-01), the new tests' API usage, and XML resource edits.
+1. **The last commit is unverified.** GitHub authentication expired mid-session, so `1aa8e14`
+   (Room/kotlinx-serialization pin, real-collaborator `InvoiceConcurrencyTest`) is committed locally
+   but not pushed or executed. If the serialization pin does not hold, the migration suites stay
+   red - the next CI run decides this, and the annotations will name the failing tests.
 2. **Migration 18→19 remains unproven for data preservation** (INTEGER→TEXT `businessId` across
    three recreated tables). It is covered by an instrumented test that asserts the schema, but not
    by a test that asserts row contents survive a real upgrade path.
-3. **Concurrency guarantees rely on instrumentation tests** (`InvoiceConcurrencyTest`,
-   `InvoiceIdempotencyTest`); those suites must actually run on an emulator before release.
+3. **Concurrency guarantees rely on instrumented tests** (`InvoiceConcurrencyTest`,
+   `InvoiceIdempotencyTest`). They only started executing in this pass; treat the first fully green
+   emulator run as the point where those invariants become evidence rather than intent.
 4. **Missing indexes** will cause gradually degrading history/dashboard queries as data grows.
 5. **No static-analysis gate** (detekt/ktlint) means style/robustness regressions are invisible
    until review.
@@ -208,8 +275,9 @@ Improved instrumented coverage:
 ## Recommended Follow-Up Work
 
 **P0 (before the next release)**
-- Run the full CI pipeline on this branch: `assembleDebug` (proves the Dagger/DI fix), `lintDebug`,
-  `testDebugUnitTest` (the 12 JVM suites) and `connectedDebugAndroidTest` on API 36.
+- Reconnect GitHub, push `1aa8e14` and re-run the workflow: `assembleDebug` + `lintDebug` +
+  `testDebugUnitTest` are already green (run `36891885134`); the acceptance gate is now
+  `connectedDebugAndroidTest` on API 36 reporting 0 failures.
 - Extend `DatabaseMigrationTest` to prove **row preservation** across 18→19 for `stock_movements`,
   `payments` and `customers` (counts, `businessId` conversion, FK integrity) and across the
   `defer_foreign_keys` migrations.
@@ -226,7 +294,8 @@ Improved instrumented coverage:
 - Introduce detekt/ktlint with a committed baseline.
 
 **P2 (backlog)**
-- Bump the Compose BOM to a Kotlin-2.2-compatible release and add a UI smoke test.
+- Move the chart screen to the newest stable Vico 2.x (2.5.2) once the Compose BOM moves past
+  2025.01.00, and add a UI smoke test for the dashboard chart.
 - Move user-facing strings to `strings.xml` and adopt a lint rule for hardcoded text.
 - Replace the dashboard `combine` vararg casts with a typed holder to remove the
   `Array<Any?>` positional coupling.
@@ -237,24 +306,38 @@ Improved instrumented coverage:
 
 ## Change Summary
 
-- **50 files touched:** 40 modified, 2 deleted (`di/AppModule.kt`, `domain/security/EncryptionManager.kt`),
-  8 added (`SECURITY.md`, `PdfCacheManager.kt`, 6 new test files).
-- **Diff size:** +993 / −356 lines in tracked files, plus ~740 lines of new tests.
+- **53 files changed vs `main`** (+2286 / −398): 42 modified, 9 added, 2 deleted
+  (`di/AppModule.kt`, `domain/security/EncryptionManager.kt`).
+- **Commits on this branch:** `ad0a351` (integrity/security fix batch + tests), `f497d5a` +
+  `414aa9f` (CI masking fix, verification gates, diagnostics), `57acb36` (typed history query +
+  tests), `9d30d2e` (Vico 2.x / imports / Compose BOM), `9ddbdb2` (per-test failure
+  annotations), `a8e88f5` (corrected bind-list assertion), `8a68a98` (`readString` return),
+  `1aa8e14` (real-collaborator instrumented tests + serialization pin).
+- **Build/dependencies:** Vico `1.14.0` → `2.0.3` (API-verified), Compose BOM `2024.05.00` →
+  `2025.01.00`, `navigation-compose` beta → `2.8.9`, Mockito 4 → 5.14.2 (JVM only), removed the
+  unused `mockito-android`, forced `kotlinx-serialization-core/-json` `1.7.3` for Room's
+  migration serializers.
+- **Test fixes:** the instrumented suite compiles and runs for the first time (no on-device
+  mocking of final classes, real `QuotaGate`/`BusinessContext`), the migration suite can read
+  Room's schema bundles, and one self-inflicted over-strict assertion was corrected.
 - **Production code:** quota/timezone correctness (`QuotaGate`, `QuotaVerdict`, `SystemClock`),
   invoice/payment integrity (`InvoiceRepository`, `PaymentRepository`, `InvoiceViewModel`,
   `InvoicePreviewViewModel`), product ledgers (`ProductRepository`, `ProductViewModel`),
   setup/GSTIN validation (`SetupViewModel`, `SetupScreen`, `InvoiceScreen`), PDF bounds
   (`PdfGenerator`, `PdfConstants`, `PdfCacheManager`), migrations (`AppDatabase`), DI cleanup
   (`AppModule` removed), SQL query typing (`InvoiceHistoryFilter`), history race
-  (`InvoiceHistoryViewModel`), logging interpolation (`BusinessRepository`), and removal of dead
-  code (`Converters`, `InvoiceDao`, use cases).
+  (`InvoiceHistoryViewModel`), logging interpolation (`BusinessRepository`), dead code removal
+  (`Converters`, `InvoiceDao`, use cases).
 - **Security/config:** manifest (`allowBackup=false`, `usesCleartextTraffic=false`), both backup
   rule files, new `.gitignore`, `SECURITY.md`, CI dependency review.
+- **CI:** `--no-build-cache` on test/lint/connected tasks, unit/instrumented/lint verification
+  gates that fail when a suite did not run, per-test failure annotations, raw Gradle and
+  instrumentation log uploads, `if-no-files-found: error` on report uploads.
 - **Docs:** `README.md` rewritten to match actual behaviour (offline-first, encryption, quota,
   PDF immutability, build/verify commands, migration policy, known gaps); `SECURITY.md` added.
 - **Deliberately unchanged:** database passphrase derivation (changing it would orphan every
-  deployed database), all existing migrations' data transformations, Room schema pin at v19,
+  deployed database), existing migrations' data transformations, Room schema pin at v19,
   `FLAG_SECURE` (screenshots are a user need), and the PDF cache's conservative pruning policy.
-- **Blocking caveat:** none of the above could be compiled or executed in this environment
-  (no JDK, Gradle, Android SDK or network). Treat the CI run as the acceptance gate for this
-  changeset.
+- **Blocking caveat:** the final commit has not been pushed or executed - GitHub authentication
+  expired mid-session. Everything up to `a8e88f5` is executed and green (build, lint, 71 JVM
+  tests, Room v19 schema); the instrumented fixes need one more CI run.
