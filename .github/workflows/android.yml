@@ -5,8 +5,25 @@ on:
     branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
+  workflow_dispatch:
 
 jobs:
+  dependency-review:
+    name: Dependency Vulnerability Review
+    runs-on: ubuntu-latest
+    # Only pull requests have a dependency diff to review.
+    if: github.event_name == 'pull_request'
+    steps:
+    - uses: actions/checkout@v4
+
+    # Reported as a check but non-blocking until the repository dependency graph is
+    # confirmed to be enabled; remove `continue-on-error` to make it a hard gate.
+    - name: Review dependency changes for known vulnerabilities
+      continue-on-error: true
+      uses: actions/dependency-review-action@v4
+      with:
+        fail-on-severity: high
+
   build:
     name: Build, Lint & Unit Tests
     runs-on: ubuntu-latest
@@ -32,7 +49,17 @@ jobs:
       shell: bash
       run: |
         if [[ -f gradle-build.log ]]; then
-          tail -n 40 gradle-build.log
+          echo "--- first errors in gradle-build.log ---"
+          head_lines=$(grep -n -m 25 -E '^(e: |error:|w: .*error|FAILURE:|> Task .*FAILED|Execution failed for task|\* What went wrong:|Caused by:|Exception)' gradle-build.log || true)
+          printf '%s\n' "$head_lines"
+          # Also surface these as an annotation: annotations are readable from the PR checks
+          # UI and the API even when raw job logs are not accessible.
+          head=$(printf '%s\n' "$head_lines" | head -n 12 | sed -e 's/%/%25/g' -e 's/\r/%0D/g' | paste -sd ' ' -)
+          if [[ -n "$head" ]]; then
+            echo "::error title=Gradle build diagnostics (first errors)::$head"
+          fi
+          echo "--- end of gradle-build.log ---"
+          tail -n 25 gradle-build.log
           summary=$(tail -n 30 gradle-build.log | sed -e 's/%/%25/g' -e 's/\r/%0D/g' | paste -sd ' ' -)
           echo "::error title=Gradle build diagnostics::$summary"
         fi
@@ -50,7 +77,7 @@ jobs:
       shell: bash
       run: |
         set -o pipefail
-        ./gradlew clean :app:kaptDebugKotlin --no-build-cache --stacktrace --console=plain 2>&1 | tee room-schema.log
+        ./gradlew clean :app:kaptDebugKotlin --no-build-cache -ProomSchemaExport=true --stacktrace --console=plain 2>&1 | tee room-schema.log
 
     - name: Report Room schema generation failure
       if: steps.generate_room_schema.outcome == 'failure'
@@ -77,27 +104,128 @@ jobs:
         if-no-files-found: warn
 
     - name: Run Unit Tests
-      run: ./gradlew testDebugUnitTest --stacktrace --console=plain 2>&1 | tee unit-test.log
+      # --no-build-cache forces real execution: a task served entirely from the build
+      # cache writes no JUnit XML, so the verification step below could not tell the
+      # difference between "tests passed" and "tests never ran".
+      run: ./gradlew testDebugUnitTest --no-build-cache --stacktrace --console=plain 2>&1 | tee unit-test.log
+
+    # A green test step is worthless if the task was skipped or discovered no tests.
+    # This gate asserts the JUnit XML exists, that the security/regression suites really
+    # executed, and that the run is clean.
+    - name: Verify unit tests actually executed
+      shell: bash
+      run: |
+        results_dir=app/build/test-results/testDebugUnitTest
+        if [[ ! -d "$results_dir" ]]; then
+          echo "::error title=Unit tests produced no results::$results_dir does not exist - the test task did not run."
+          exit 1
+        fi
+        python3 - <<'PY'
+        import glob, os, sys, xml.etree.ElementTree as ET
+
+        files = sorted(glob.glob('app/build/test-results/testDebugUnitTest/TEST-*.xml'))
+        total = failures = errors = skipped = 0
+        failing = []
+        skipped_tests = []
+        classes = set()
+        for path in files:
+            root = ET.parse(path).getroot()
+            total += int(root.get('tests', 0) or 0)
+            failures += int(root.get('failures', 0) or 0)
+            errors += int(root.get('errors', 0) or 0)
+            skipped += int(root.get('skipped', 0) or 0)
+            for case in root.iter('testcase'):
+                if case.get('classname'):
+                    classes.add(case.get('classname'))
+                for bad in list(case.iter('failure')) + list(case.iter('error')):
+                    message = ' '.join((bad.get('message') or bad.text or '').split())
+                    failing.append(f"{case.get('classname')}.{case.get('name')}: {message[:200]}")
+                for skip in case.iter('skipped'):
+                    message = ' '.join((skip.get('message') or skip.text or '').split())
+                    skipped_tests.append(f"{case.get('classname')}.{case.get('name')}: {message[:220]}")
+
+        # Name every failing case in an annotation: raw job logs and report artifacts are not
+        # always retrievable, so the annotation is the durable diagnostic channel.
+        for entry in failing[:20]:
+            print(f"::error title=Failing unit test::{entry}")
+        print(f"Unit tests: {total} cases in {len(files)} classes "
+              f"({failures} failures, {errors} errors, {skipped} skipped)")
+        print(f"::notice title=Unit tests executed::{total} cases in {len(files)} classes, "
+              f"{failures} failures, {errors} errors, {skipped} skipped")
+
+        required = [
+            'BackupPolicyTest',
+            'PdfCacheManagerTest',
+            'InvoiceHistoryFilterTest',
+            'RequestFingerprintTest',
+            'SystemClockTest',
+            'AppDateUtilsTest',
+        ]
+        names = {os.path.basename(f) for f in files}
+        missing = [cls for cls in required if not any(cls in n for n in names)]
+
+        problems = []
+        if not files:
+            problems.append('no JUnit XML was produced')
+        if total == 0:
+            problems.append('zero test cases executed')
+        if failures or errors:
+            problems.append(f'{failures} failures / {errors} errors')
+        if missing:
+            problems.append('missing critical suites: ' + ', '.join(missing))
+        if problems:
+            for problem in problems:
+                print(f"::error title=Unit test verification failed::{problem}")
+            sys.exit(1)
+        PY
 
     - name: Report unit test failure details
       if: failure()
       shell: bash
       run: |
         if [[ -f unit-test.log ]]; then
-          tail -n 40 unit-test.log
+          echo "--- first errors in unit-test.log ---"
+          head_lines=$(grep -n -m 25 -E '^(e: |error:|w: .*error|FAILURE:|> Task .*FAILED|Execution failed for task|\* What went wrong:|Caused by:|Exception)' unit-test.log || true)
+          printf '%s\n' "$head_lines"
+          # Also surface these as an annotation: annotations are readable from the PR checks
+          # UI and the API even when raw job logs are not accessible.
+          head=$(printf '%s\n' "$head_lines" | head -n 12 | sed -e 's/%/%25/g' -e 's/\r/%0D/g' | paste -sd ' ' -)
+          if [[ -n "$head" ]]; then
+            echo "::error title=Unit test diagnostics (first errors)::$head"
+          fi
+          echo "--- end of unit-test.log ---"
+          tail -n 25 unit-test.log
           summary=$(tail -n 30 unit-test.log | sed -e 's/%/%25/g' -e 's/\r/%0D/g' | paste -sd ' ' -)
           echo "::error title=Unit test diagnostics::$summary"
         fi
 
     - name: Run Android Lint
-      run: ./gradlew lintDebug --stacktrace --console=plain 2>&1 | tee lint.log
+      run: ./gradlew lintDebug --no-build-cache --stacktrace --console=plain 2>&1 | tee lint.log
+
+    - name: Verify lint report was produced
+      shell: bash
+      run: |
+        if [[ ! -s app/build/reports/lint-results-debug.html ]]; then
+          echo "::error title=Android lint produced no report::app/build/reports/lint-results-debug.html is missing or empty - lint did not execute."
+          exit 1
+        fi
 
     - name: Report lint failure details
       if: failure()
       shell: bash
       run: |
         if [[ -f lint.log ]]; then
-          tail -n 40 lint.log
+          echo "--- first errors in lint.log ---"
+          head_lines=$(grep -n -m 25 -E '^(e: |error:|w: .*error|FAILURE:|> Task .*FAILED|Execution failed for task|\* What went wrong:|Caused by:|Exception)' lint.log || true)
+          printf '%s\n' "$head_lines"
+          # Also surface these as an annotation: annotations are readable from the PR checks
+          # UI and the API even when raw job logs are not accessible.
+          head=$(printf '%s\n' "$head_lines" | head -n 12 | sed -e 's/%/%25/g' -e 's/\r/%0D/g' | paste -sd ' ' -)
+          if [[ -n "$head" ]]; then
+            echo "::error title=Android lint diagnostics (first errors)::$head"
+          fi
+          echo "--- end of lint.log ---"
+          tail -n 25 lint.log
           summary=$(tail -n 30 lint.log | sed -e 's/%/%25/g' -e 's/\r/%0D/g' | paste -sd ' ' -)
           echo "::error title=Android lint diagnostics::$summary"
         fi
@@ -126,7 +254,10 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: unit-test-reports
-        path: app/build/reports/tests/testDebugUnitTest/
+        path: |
+          app/build/reports/tests/testDebugUnitTest/
+          app/build/test-results/testDebugUnitTest/
+        if-no-files-found: error
 
     - name: Upload Lint Reports
       if: always()
@@ -134,6 +265,19 @@ jobs:
       with:
         name: lint-reports
         path: app/build/reports/lint-results-debug.html
+        if-no-files-found: error
+
+    - name: Upload Gradle logs
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: gradle-logs
+        path: |
+          gradle-build.log
+          room-schema.log
+          unit-test.log
+          lint.log
+        if-no-files-found: warn
 
   instrumented-tests:
     name: Instrumented Tests
@@ -159,6 +303,18 @@ jobs:
         sudo udevadm control --reload-rules
         sudo udevadm trigger --name-match=kvm
 
+    - name: Resolve instrumented dependency versions
+      shell: bash
+      run: |
+        ./gradlew :app:dependencyInsight --dependency kotlinx-serialization-core \
+          --configuration debugAndroidTestRuntimeClasspath --console=plain 2>/dev/null \
+          | grep -E "kotlinx-serialization-core:[0-9]" | sort -u | head -n 5 > serialization-versions.txt || true
+        if [[ -s serialization-versions.txt ]]; then
+          echo "::notice title=Instrumented kotlinx-serialization-core::$(paste -sd '; ' serialization-versions.txt)"
+        else
+          echo "::notice title=Instrumented kotlinx-serialization-core::dependencyInsight produced no match"
+        fi
+
     - name: Run Instrumented Tests
       uses: reactivecircus/android-emulator-runner@v2
       with:
@@ -167,15 +323,72 @@ jobs:
         target: google_apis
         emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
         disable-animations: true
-        script: ./gradlew connectedDebugAndroidTest --stacktrace --console=plain 2>&1 | tee instrumentation.log
+        script: ./gradlew connectedDebugAndroidTest --no-build-cache --stacktrace --console=plain 2>&1 | tee instrumentation.log
+
+    - name: Verify instrumented tests actually executed
+      shell: bash
+      run: |
+        results=$(find app/build/outputs/androidTest-results -name 'TEST-*.xml' 2>/dev/null | wc -l)
+        if [[ "$results" -eq 0 ]]; then
+          echo "::error title=Instrumented tests produced no results::No JUnit XML under app/build/outputs/androidTest-results - the connected run did not execute tests."
+          find app/build -maxdepth 4 -type d 2>/dev/null | head -40 || true
+          exit 1
+        fi
+        python3 - <<'PY'
+        import glob, sys, xml.etree.ElementTree as ET
+
+        files = sorted(glob.glob('app/build/outputs/androidTest-results/**/TEST-*.xml', recursive=True))
+        total = failures = errors = skipped = 0
+        failing = []
+        skipped_tests = []
+        classes = set()
+        for path in files:
+            root = ET.parse(path).getroot()
+            total += int(root.get('tests', 0) or 0)
+            failures += int(root.get('failures', 0) or 0)
+            errors += int(root.get('errors', 0) or 0)
+            skipped += int(root.get('skipped', 0) or 0)
+            for case in root.iter('testcase'):
+                if case.get('classname'):
+                    classes.add(case.get('classname'))
+                for bad in list(case.iter('failure')) + list(case.iter('error')):
+                    message = ' '.join((bad.get('message') or bad.text or '').split())
+                    failing.append(f"{case.get('classname')}.{case.get('name')}: {message[:200]}")
+                for skip in case.iter('skipped'):
+                    message = ' '.join((skip.get('message') or skip.text or '').split())
+                    skipped_tests.append(f"{case.get('classname')}.{case.get('name')}: {message[:220]}")
+
+        for entry in failing[:25]:
+            print(f"::error title=Failing instrumented test::{entry}")
+        for entry in skipped_tests[:10]:
+            print(f"::notice title=Skipped instrumented test::{entry}")
+        print(f"Instrumented tests: {total} cases in {len(classes)} classes "
+              f"({failures} failures, {errors} errors, {skipped} skipped)")
+        print(f"::notice title=Instrumented tests executed::{total} cases in {len(classes)} classes, "
+              f"{failures} failures, {errors} errors, {skipped} skipped")
+        if total == 0:
+            sys.exit('::error title=Instrumented test verification failed::zero test cases executed')
+        if failures or errors:
+            sys.exit(f"::error title=Instrumented test verification failed::{failures} failures / {errors} errors")
+        PY
 
     - name: Report instrumented test failure details
       if: failure()
       shell: bash
       run: |
         if [[ -f instrumentation.log ]]; then
-          tail -n 50 instrumentation.log
-          summary=$(tail -n 35 instrumentation.log | sed -e 's/%/%25/g' -e 's/\r/%0D/g' | paste -sd ' ' -)
+          echo "--- first errors in instrumentation.log ---"
+          head_lines=$(grep -n -m 25 -E '^(e: |error:|w: .*error|FAILURE:|> Task .*FAILED|Execution failed for task|\* What went wrong:|Caused by:|Exception)' instrumentation.log || true)
+          printf '%s\n' "$head_lines"
+          # Also surface these as an annotation: annotations are readable from the PR checks
+          # UI and the API even when raw job logs are not accessible.
+          head=$(printf '%s\n' "$head_lines" | head -n 12 | sed -e 's/%/%25/g' -e 's/\r/%0D/g' | paste -sd ' ' -)
+          if [[ -n "$head" ]]; then
+            echo "::error title=Instrumented test diagnostics (first errors)::$head"
+          fi
+          echo "--- end of instrumentation.log ---"
+          tail -n 25 instrumentation.log
+          summary=$(tail -n 30 instrumentation.log | sed -e 's/%/%25/g' -e 's/\r/%0D/g' | paste -sd ' ' -)
           echo "::error title=Instrumented test diagnostics::$summary"
         fi
 
@@ -184,4 +397,15 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: instrumented-test-reports
-        path: app/build/reports/androidTests/connected/
+        path: |
+          app/build/reports/androidTests/connected/
+          app/build/outputs/androidTest-results/
+        if-no-files-found: error
+
+    - name: Upload Instrumented log
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: instrumentation-log
+        path: instrumentation.log
+        if-no-files-found: warn

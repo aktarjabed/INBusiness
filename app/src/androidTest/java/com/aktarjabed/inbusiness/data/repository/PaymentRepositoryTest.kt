@@ -216,6 +216,44 @@ class PaymentRepositoryTest {
         assertEquals(90.0, invoiceDao.getInvoiceById(INVOICE_ID, BUSINESS_ID)!!.balanceDue, 0.001)
     }
 
+    /**
+     * Invoices created before the `payments` table existed (schema < 15) carry a
+     * summarised `amountPaid` with no ledger rows. Recording a new payment used to fail
+     * the reconciliation check permanently, locking the user out of their own ledger.
+     */
+    @Test
+    fun repairsLegacyInvoiceSummaryWithoutLedgerRows() = runBlocking {
+        val legacyPaid = 50.0
+        invoiceDao.updateInvoice(
+            invoiceDao.getInvoiceById(INVOICE_ID, BUSINESS_ID)!!.copy(
+                amountPaid = legacyPaid,
+                balanceDue = 50.0,
+                paymentMethod = "CASH"
+            )
+        )
+
+        paymentRepository.addPayment(
+            Payment(
+                businessId = BUSINESS_ID,
+                invoiceId = INVOICE_ID,
+                amount = 10.0,
+                paymentMode = "UPI"
+            )
+        )
+
+        val invoice = invoiceDao.getInvoiceById(INVOICE_ID, BUSINESS_ID)!!
+        assertEquals(60.0, invoice.amountPaid, 0.001)
+        assertEquals(40.0, invoice.balanceDue, 0.001)
+
+        val payments = paymentDao.getPaymentsForInvoice(BUSINESS_ID, INVOICE_ID).first()
+        assertEquals(2, payments.size)
+        assertTrue(
+            "The legacy amount must be recorded as an explicit opening balance, not discarded",
+            payments.any { it.referenceNumber == "OPENING_BALANCE" && it.amount == legacyPaid }
+        )
+        assertEquals(60.0, paymentDao.getTotalPaidForInvoice(BUSINESS_ID, INVOICE_ID)!!, 0.001)
+    }
+
     private suspend fun assertIllegalArgument(action: suspend () -> Unit) {
         try {
             action()

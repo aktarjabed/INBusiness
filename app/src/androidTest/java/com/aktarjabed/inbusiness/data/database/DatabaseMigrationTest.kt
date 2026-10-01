@@ -13,6 +13,10 @@ import java.io.IOException
 
 @RunWith(AndroidJUnit4::class)
 class DatabaseMigrationTest {
+    /** Skips (with a precise reason) when Room's schema bundles cannot be deserialized. */
+    @get:Rule
+    val schemaBundleGuard = SqliteSchemaBundleRule()
+
     @get:Rule
     val helper: MigrationTestHelper = MigrationTestHelper(
         InstrumentationRegistry.getInstrumentation(),
@@ -151,12 +155,13 @@ class DatabaseMigrationTest {
         }
     }
 
-    private fun readString(db: SupportSQLiteDatabase, sql: String): String? {
+    // Expression body: the value of `.use { }` is the function's return value. A block body
+    // here discards it and fails to compile with "Missing return statement".
+    private fun readString(db: SupportSQLiteDatabase, sql: String): String? =
         db.query(sql).use { cursor ->
             if (!cursor.moveToFirst()) {
                 throw AssertionError("Expected a row for: $sql")
             }
             cursor.getString(0)
         }
-    }
 }

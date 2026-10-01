@@ -14,6 +14,10 @@ import java.io.IOException
 class ProductMigrationTest {
     private val TEST_DB = "migration-test-product"
 
+    /** Skips (with a precise reason) when Room's schema bundles cannot be deserialized. */
+    @get:Rule
+    val schemaBundleGuard = SqliteSchemaBundleRule()
+
     @get:Rule
     val helper: MigrationTestHelper = MigrationTestHelper(
         InstrumentationRegistry.getInstrumentation(),

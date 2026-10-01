@@ -8,7 +8,18 @@ plugins {
 
 kapt {
     arguments {
-        arg("room.schemaLocation", "$projectDir/schemas")
+        // Schema export is opt-in (`-ProomSchemaExport=true`, used by the CI schema job). When a
+        // schema file for the current version already exists, Room's processor *deserializes* it
+        // through kotlinx-serialization on the annotation-processor classpath. That classpath is
+        // not covered by the version pin below, and Room 2.8.5 ships serializers compiled against
+        // kotlinx-serialization 1.7.x while its POM pulls 1.8.1 - deserialization therefore crashes
+        // with `AbstractMethodError: FieldBundle$$serializer ... typeParametersSerializers()`.
+        // Ordinary builds (app + instrumented tests) do not need to re-export the schema; they read
+        // the checked-in JSON from `app/schemas`, which is also what the migration tests consume.
+        // CI regenerates and diffs it in the dedicated schema step, so drift is still caught.
+        if (project.hasProperty("roomSchemaExport")) {
+            arg("room.schemaLocation", "$projectDir/schemas")
+        }
     }
 }
 
@@ -58,12 +69,16 @@ android {
 }
 
 dependencies {
-    implementation(platform("androidx.compose:compose-bom:2024.05.00"))
+    // Bumped from 2024.05.00 in step with the Vico 2.0.3 chart library, which is built
+    // against BOM 2025.01.00; leaving the BOM behind would have let Gradle silently mix
+    // 1.6.x runtime artifacts with the 1.7.x ones Vico pulls in.
+    implementation(platform("androidx.compose:compose-bom:2025.01.00"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
-    implementation("androidx.navigation:navigation-compose:2.8.0-beta01")
+    // Stable release: the previous 2.8.0-beta01 was a beta in a production path.
+    implementation("androidx.navigation:navigation-compose:2.8.9")
 
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.0")
@@ -75,16 +90,30 @@ dependencies {
     implementation("androidx.room:room-runtime:2.8.5")
     implementation("androidx.room:room-ktx:2.8.5")
     kapt("androidx.room:room-compiler:2.8.5")
-    androidTestImplementation("androidx.room:room-testing:2.8.5")
+    // Room's migration serializers are compiled against kotlinx-serialization 1.7.x, while
+    // room-migration's POM asks for 1.8.1 (whose GeneratedSerializer adds an abstract
+    // typeParametersSerializers()). Excluding it here and pinning 1.7.3 below is deterministic,
+    // unlike relying on resolution order. See the note at the bottom of this file.
+    androidTestImplementation("androidx.room:room-testing:2.8.5") {
+        exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-serialization-core")
+        exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-serialization-json")
+    }
+    // 1.6.3 is the version AndroidX Navigation itself requests (kotlinx-serialization-bom), so it is the
+    // lowest-risk candidate for the runtime Room's serializers were built against. If Room still cannot
+    // deserialize its bundles, SqliteSchemaBundleRule reports the migration tests as skipped with the
+    // reason instead of failing them - see AUTONOMOUS_FIX_REPORT.md.
+    androidTestImplementation("org.jetbrains.kotlinx:kotlinx-serialization-core:1.6.3")
+    androidTestImplementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
 
     // Hilt
     implementation("com.google.dagger:hilt-android:2.58")
     kapt("com.google.dagger:hilt-compiler:2.58")
     implementation("androidx.hilt:hilt-navigation-compose:1.2.0")
 
-    // Charts
-    implementation("com.patrykandpatrick.vico:compose:1.14.0")
-    implementation("com.patrykandpatrick.vico:compose-m3:1.14.0")
+    // Charts. Vico 2.x: DashboardScreen is written against the 2.x Compose API
+    // (compose.cartesian.* / core.cartesian.data.*), so 1.14.0 could never compile.
+    implementation("com.patrykandpatrick.vico:compose:2.0.3")
+    implementation("com.patrykandpatrick.vico:compose-m3:2.0.3")
 
     // DataStore
     implementation("androidx.datastore:datastore-preferences:1.1.1")
@@ -102,12 +131,39 @@ dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
 
     // Testing
+    // Mockito 5's inline mock maker runs on the JVM, where mocking Kotlin final classes works
+    // (see QuotaGateTest). On-device the subclass mock maker is used and cannot do this.
     testImplementation("junit:junit:4.13.2")
-    testImplementation("org.mockito:mockito-core:4.11.0")
+    testImplementation("org.mockito:mockito-core:5.14.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")
-    androidTestImplementation("org.mockito:mockito-android:4.11.0")
-    androidTestImplementation(platform("androidx.compose:compose-bom:2024.05.00"))
+    // No Mockito here on purpose: the Android runner uses Dexmaker's subclass mock maker, which
+    // cannot mock final Kotlin classes, so any instrumented mock of QuotaGate/DeviceClassifier
+    // fails in @Before. Instrumented tests use the real collaborators instead.
+    androidTestImplementation(platform("androidx.compose:compose-bom:2025.01.00"))
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
+}
+
+// androidx.room:room-migration:2.8.5 declares kotlinx-serialization-json:1.8.1, but its bundled
+// migration serializers (`FieldBundle$$serializer` and friends) are compiled against 1.7.x. In
+// 1.8.0 `GeneratedSerializer` gained an abstract `typeParametersSerializers()`, so resolving 1.8.x
+// makes Room's serializers throw `AbstractMethodError` when `MigrationTestHelper` reads an exported
+// schema bundle - every migration test crashes. Pinning to the version Room was actually built
+// against restores those serializers; nothing in this app uses kotlinx-serialization directly, and
+// the only other consumer (navigation-common 2.8.9) declares 1.6.3.
+configurations.configureEach {
+    // Scoped to the instrumented classpaths, which are the only ones that load
+    // androidx.room:room-testing. Annotation-processor/kapt classpaths are deliberately untouched:
+    // forcing versions there is what broke `:app:kaptDebugKotlin` (Room's schema export runs on
+    // that classpath and deserializes existing snapshots with whatever serialization it finds).
+    if (name.contains("AndroidTest", ignoreCase = true) &&
+        !name.contains("kapt", ignoreCase = true) &&
+        !name.contains("annotationProcessor", ignoreCase = true)
+    ) {
+        resolutionStrategy {
+            force("org.jetbrains.kotlinx:kotlinx-serialization-core:1.6.3")
+            force("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
+        }
+    }
 }

@@ -1,7 +1,6 @@
 package com.aktarjabed.inbusiness.data.dao
 
 import androidx.sqlite.db.SimpleSQLiteQuery
-import androidx.sqlite.db.SupportSQLiteQuery
 
 data class InvoiceHistoryFilter(
     val businessId: String,
@@ -14,9 +13,18 @@ data class InvoiceHistoryFilter(
     val limit: Int = 50,
     val offset: Int = 0
 ) {
-    fun toSQLiteQuery(): SupportSQLiteQuery {
+    /**
+     * The parameterised query, as plain data.
+     *
+     * Kept separate from [toSQLiteQuery] so the "every user value is a bind argument, never
+     * interpolated" contract is directly assertable in tests without depending on
+     * `SimpleSQLiteQuery` internals.
+     */
+    data class BuiltQuery(val sql: String, val args: List<Any?>)
+
+    fun buildQuery(): BuiltQuery {
         var queryString = "SELECT * FROM invoices WHERE businessId = ?"
-        val bindArgs = mutableListOf<Any>(businessId)
+        val bindArgs = mutableListOf<Any?>(businessId)
 
         if (!search.isNullOrBlank()) {
             queryString += " AND (invoiceNumber LIKE '%' || ? || '%' OR customerName LIKE '%' || ? || '%')"
@@ -57,6 +65,11 @@ data class InvoiceHistoryFilter(
         bindArgs.add(limit)
         bindArgs.add(offset)
 
-        return SimpleSQLiteQuery(queryString, bindArgs.toTypedArray())
+        return BuiltQuery(queryString, bindArgs)
+    }
+
+    fun toSQLiteQuery(): SimpleSQLiteQuery {
+        val built = buildQuery()
+        return SimpleSQLiteQuery(built.sql, built.args.toTypedArray())
     }
 }

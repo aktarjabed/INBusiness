@@ -1,6 +1,7 @@
 package com.aktarjabed.inbusiness.utils
 
-import kotlin.math.roundToLong
+import java.math.BigDecimal
+import java.math.RoundingMode
 
 object AmountInWordsConverter {
 
@@ -18,7 +19,14 @@ object AmountInWordsConverter {
         require(amount.isFinite()) { "Amount must be finite" }
         require(amount >= 0.0) { "Amount cannot be negative" }
 
-        val totalPaise = (amount * 100).roundToLong()
+        // Round through BigDecimal (HALF_UP) instead of binary floating point so the
+        // words always agree with the numeric total on the invoice. Computing
+        // `(amount * 100).roundToLong()` directly rounds 1.005 down to 1.00 because the
+        // double is stored slightly below 1.005.
+        val totalPaise = BigDecimal.valueOf(amount)
+            .movePointRight(2)
+            .setScale(0, RoundingMode.HALF_UP)
+            .longValueExact()
         val rupees = totalPaise / 100
         val paise = totalPaise % 100
 

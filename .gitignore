@@ -1,6 +1,37 @@
-app/build/
+# Gradle / build outputs
 .gradle/
-.gradle/
+build/
 app/build/
-.ideavo/project
 *.log
+
+# IDE
+.idea/
+*.iml
+.ideavo/project
+
+# Android SDK location (machine specific, may contain local paths)
+local.properties
+
+# Signing material — must never be committed
+*.jks
+*.keystore
+keystore.properties
+signing.properties
+
+# Secrets / environment configuration
+.env
+.env.*
+secrets.properties
+
+# Local SQLite/SQLCipher databases and generated invoices (runtime artifacts)
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+*.sqlite
+*.sqlite3
+*.pdf
+
+# OS noise
+.DS_Store
+Thumbs.db

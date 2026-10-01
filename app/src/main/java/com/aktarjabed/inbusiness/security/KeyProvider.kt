@@ -17,6 +17,18 @@ class KeyProvider @Inject constructor(
         createEncryptedSharedPreferences()
     }
 
+    /**
+     * Returns the SQLCipher passphrase for the local database.
+     *
+     * The value is a 32-byte cryptographically random secret encoded with Base64,
+     * which yields ~256 bits of entropy in a printable form. The passphrase is
+     * never logged and never leaves the encrypted preference store.
+     *
+     * IMPORTANT: the raw passphrase (the Base64 text) is what SQLCipher has seen
+     * since the first release. Do not "fix" this into a decoded-byte or re-hashed
+     * derivation: any change to the derived key material makes already deployed
+     * databases permanently unreadable unless a rekey migration is shipped first.
+     */
     fun getDatabasePassphrase(): String {
         return try {
             val existingPassphrase = sharedPreferences.getString(KEY_DATABASE_PASSPHRASE, null)
@@ -51,6 +63,7 @@ class KeyProvider @Inject constructor(
     }
 
     private fun generateSecurePassphrase(): String {
+        // SecureRandom is seeded from the platform CSPRNG; 32 bytes = 256 bits.
         val random = SecureRandom()
         val passphraseBytes = ByteArray(32)
         random.nextBytes(passphraseBytes)

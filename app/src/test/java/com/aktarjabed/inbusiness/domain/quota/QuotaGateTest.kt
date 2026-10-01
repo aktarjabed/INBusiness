@@ -153,4 +153,122 @@ class QuotaGateTest {
         val verdict5 = quotaGate.assertQuota(userId, consume = true)
         assertTrue("Should be blocked on 3rd attempt", verdict5 is QuotaVerdict.DailyCap)
     }
+
+    @Test
+    fun testMonthlyCapBlocksEvenWhenDailyQuotaRemains() = runBlocking {
+        val dao = FakeUserQuotaDao()
+        val clock = TestSystemClock()
+        val userId = "monthly_user"
+        val today = clock.todayEpochDay()
+
+        dao.insertIfAbsent(
+            UserQuotaEntity(
+                userId = userId,
+                tier = "FREE",
+                dailyUsed = 0,
+                lastResetEpochDay = today,
+                monthlyUsed = 60, // monthly cap for FREE
+                lastMonthlyResetEpochDay = clock.monthStartEpochDay(),
+                watermark = true,
+                retentionDays = 30,
+                freeExpiryEpochDay = today + 365,
+                deviceTier = "LOW_END"
+            )
+        )
+
+        val quotaGate = QuotaGate(dao, DeviceClassifier(), clock, mock(Context::class.java))
+        val verdict = quotaGate.assertQuota(userId, consume = true)
+
+        assertTrue("Monthly cap must block once reached: $verdict", verdict is QuotaVerdict.MonthlyCap)
+        assertEquals("Monthly usage must not exceed the cap", 60, dao.getQuota(userId)!!.monthlyUsed)
+        assertEquals("Daily usage must not be consumed by a blocked request", 0, dao.getQuota(userId)!!.dailyUsed)
+    }
+
+    @Test
+    fun testExpiredFreeTierIsBlocked() = runBlocking {
+        val dao = FakeUserQuotaDao()
+        val clock = TestSystemClock()
+        val userId = "expired_user"
+        val today = clock.todayEpochDay()
+
+        dao.insertIfAbsent(
+            UserQuotaEntity(
+                userId = userId,
+                tier = "FREE",
+                dailyUsed = 0,
+                lastResetEpochDay = today,
+                monthlyUsed = 0,
+                lastMonthlyResetEpochDay = clock.monthStartEpochDay(),
+                watermark = true,
+                retentionDays = 30,
+                freeExpiryEpochDay = today - 1,
+                deviceTier = "LOW_END"
+            )
+        )
+
+        val quotaGate = QuotaGate(dao, DeviceClassifier(), clock, mock(Context::class.java))
+        val verdict = quotaGate.assertQuota(userId, consume = true)
+
+        assertTrue("Expired free tier must be blocked: $verdict", verdict is QuotaVerdict.FreeExpired)
+        assertEquals("No quota may be consumed after expiry", 0, dao.getQuota(userId)!!.dailyUsed)
+    }
+
+    @Test
+    fun testDailyUsageResetsOnANewBusinessDay() = runBlocking {
+        val dao = FakeUserQuotaDao()
+        val clock = TestSystemClock()
+        val userId = "rollover_user"
+        val today = clock.todayEpochDay()
+
+        dao.insertIfAbsent(
+            UserQuotaEntity(
+                userId = userId,
+                tier = "FREE",
+                dailyUsed = 2, // exhausted yesterday
+                lastResetEpochDay = today - 1,
+                monthlyUsed = 5,
+                lastMonthlyResetEpochDay = clock.monthStartEpochDay(),
+                watermark = true,
+                retentionDays = 30,
+                freeExpiryEpochDay = today + 365,
+                deviceTier = "LOW_END"
+            )
+        )
+
+        val quotaGate = QuotaGate(dao, DeviceClassifier(), clock, mock(Context::class.java))
+        val verdict = quotaGate.assertQuota(userId, consume = true)
+
+        assertTrue("A new day must reset the daily counter: $verdict", verdict is QuotaVerdict.Allowed)
+        assertEquals("Daily usage must restart at 1", 1, dao.getQuota(userId)!!.dailyUsed)
+        assertEquals("Monthly usage must keep accumulating", 6, dao.getQuota(userId)!!.monthlyUsed)
+    }
+
+    @Test
+    fun overUsedQuotaRowIsReportedAsDailyCapInsteadOfNegativeRemaining() = runBlocking {
+        val dao = FakeUserQuotaDao()
+        val clock = TestSystemClock()
+        val userId = "remaining_user"
+        val today = clock.todayEpochDay()
+
+        // Historically inconsistent row: more usage recorded than the cap allows.
+        dao.insertIfAbsent(
+            UserQuotaEntity(
+                userId = userId,
+                tier = "FREE",
+                dailyUsed = 7,
+                lastResetEpochDay = today,
+                monthlyUsed = 0,
+                lastMonthlyResetEpochDay = clock.monthStartEpochDay(),
+                watermark = true,
+                retentionDays = 30,
+                freeExpiryEpochDay = today + 365,
+                deviceTier = "LOW_END"
+            )
+        )
+
+        val quotaGate = QuotaGate(dao, DeviceClassifier(), clock, mock(Context::class.java))
+        val verdict = quotaGate.assertQuota(userId, consume = false)
+
+        assertTrue("Over-used quota must report the daily cap", verdict is QuotaVerdict.DailyCap)
+    }
 }

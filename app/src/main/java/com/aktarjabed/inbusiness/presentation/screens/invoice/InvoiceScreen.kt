@@ -33,6 +33,10 @@ fun InvoiceScreen(
     val customerName by viewModel.customerName.collectAsState()
     val customerGSTIN by viewModel.customerGSTIN.collectAsState()
     val buyerAddress by viewModel.buyerAddress.collectAsState()
+    // A non-blank GSTIN must be well formed: it drives supply-type detection and is
+    // printed on the tax invoice, so a typo must be caught before submission.
+    val customerGstinInvalid = customerGSTIN.isNotBlank() &&
+        !com.aktarjabed.inbusiness.domain.invoice.GstCalculator.isValidGstin(customerGSTIN)
     val supplyType by viewModel.supplyType.collectAsState()
     val items by viewModel.invoiceItems.collectAsState()
     val calculationResult by viewModel.calculationResult.collectAsState()
@@ -132,6 +136,12 @@ fun InvoiceScreen(
                                     value = customerGSTIN,
                                     onValueChange = { viewModel.updateCustomerData(customerName, it, buyerAddress) },
                                     label = { Text("Customer GSTIN (Optional)") },
+                                    isError = customerGstinInvalid,
+                                    supportingText = {
+                                        if (customerGstinInvalid) {
+                                            Text("Not a valid GSTIN - leave blank for an unregistered buyer")
+                                        }
+                                    },
                                     modifier = Modifier.fillMaxWidth()
                                 )
                                 Spacer(modifier = Modifier.height(8.dp))
@@ -246,7 +256,10 @@ fun InvoiceScreen(
                                                 DropdownMenuItem(
                                                     text = { Text(method) },
                                                     onClick = {
-                                                        viewModel.paymentMethod.value = method
+                                                        // Route through the ViewModel so the pending
+                                                        // idempotency key is invalidated (the method is
+                                                        // part of the request fingerprint).
+                                                        viewModel.setPaymentMethod(method)
                                                         expanded = false
                                                     }
                                                 )
@@ -270,7 +283,10 @@ fun InvoiceScreen(
 
                             Button(
                                 onClick = { viewModel.createInvoice() },
-                                enabled = customerName.isNotBlank() && items.isNotEmpty() && supplyType != SupplyType.UNKNOWN
+                                enabled = customerName.isNotBlank() &&
+                                    items.isNotEmpty() &&
+                                    supplyType != SupplyType.UNKNOWN &&
+                                    !customerGstinInvalid
                             ) {
                                 Text("Create Invoice")
                             }

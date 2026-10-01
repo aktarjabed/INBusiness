@@ -7,6 +7,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.aktarjabed.inbusiness.domain.invoice.GstCalculator
 import com.aktarjabed.inbusiness.presentation.viewmodel.SetupViewModel
 
 @Composable
@@ -20,6 +21,10 @@ fun SetupScreen(
 
     val setupComplete by viewModel.setupComplete.collectAsState()
     val error by viewModel.error.collectAsState()
+
+    // Surface an invalid GSTIN immediately instead of letting it silently disable
+    // supply-type detection (and therefore invoicing) later on.
+    val gstinInvalid = gstin.isNotBlank() && !GstCalculator.isValidGstin(gstin)
 
     LaunchedEffect(setupComplete) {
         if (setupComplete) {
@@ -56,21 +61,27 @@ fun SetupScreen(
 
         OutlinedTextField(
             value = gstin,
-            onValueChange = { gstin = it },
+            onValueChange = { gstin = it.uppercase() },
             label = { Text("GSTIN (Optional)") },
+            isError = gstinInvalid,
+            supportingText = {
+                if (gstinInvalid) {
+                    Text("Enter a valid 15-character GSTIN or leave this blank")
+                }
+            },
             modifier = Modifier.fillMaxWidth()
         )
         Spacer(modifier = Modifier.height(32.dp))
 
-        if (error != null) {
-            Text(error!!, color = MaterialTheme.colorScheme.error)
+        error?.let { message ->
+            Text(message, color = MaterialTheme.colorScheme.error)
             Spacer(modifier = Modifier.height(16.dp))
         }
 
         Button(
             onClick = { viewModel.setupBusiness(name, address, gstin) },
             modifier = Modifier.fillMaxWidth(),
-            enabled = name.isNotBlank() && address.isNotBlank()
+            enabled = name.isNotBlank() && address.isNotBlank() && !gstinInvalid
         ) {
             Text("Complete Setup")
         }

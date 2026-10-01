@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.aktarjabed.inbusiness.data.entities.BusinessData
 import com.aktarjabed.inbusiness.data.entities.CalculationResult
 import com.aktarjabed.inbusiness.data.repository.BusinessRepository
+import com.aktarjabed.inbusiness.domain.context.BusinessContext
 import com.aktarjabed.inbusiness.domain.models.FinancialMetrics
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
@@ -12,9 +13,19 @@ import kotlinx.coroutines.launch
 import java.util.UUID
 import javax.inject.Inject
 
+/**
+ * Business calculator.
+ *
+ * Scenarios are stored in the same `business_data` table as the live business profile
+ * (a schema limitation that is tracked as a follow-up). Because of that, the active
+ * business row must never be offered as a deletable scenario: deleting it would
+ * cascade into calculation results and is blocked only by the customer/payment
+ * foreign keys.
+ */
 @HiltViewModel
 class CalculatorViewModel @Inject constructor(
-    private val repo: BusinessRepository
+    private val repo: BusinessRepository,
+    private val businessContext: BusinessContext
 ) : ViewModel() {
 
     private val _businessData = MutableStateFlow(BusinessData())
@@ -29,7 +40,10 @@ class CalculatorViewModel @Inject constructor(
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
-    private val _errorMsg = MutableSharedFlow<String>()
+    // extraBufferCapacity keeps tryEmit() from blocking: a plain MutableSharedFlow() has
+    // no buffer, so emit() suspends until a collector appears and the caller (e.g. the
+    // delete coroutine) can hang forever when the screen is not subscribed.
+    private val _errorMsg = MutableSharedFlow<String>(extraBufferCapacity = 1)
     val errorMsg: SharedFlow<String> = _errorMsg.asSharedFlow()
 
     init {
@@ -74,7 +88,7 @@ class CalculatorViewModel @Inject constructor(
                 )
                 loadSavedScenarios()
             }.onFailure {
-                _errorMsg.emit("Failed to save: ${it.localizedMessage}")
+                _errorMsg.tryEmit("Failed to save: ${it.localizedMessage}")
             }
             _isLoading.value = false
         }
@@ -88,18 +102,34 @@ class CalculatorViewModel @Inject constructor(
     fun deleteScenario(data: BusinessData) {
         viewModelScope.launch {
             runCatching {
+                val activeBusinessId = businessContext.activeBusinessId.first()
+                if (data.id == activeBusinessId) {
+                    // Never allow the live business profile to be deleted from the calculator.
+                    _errorMsg.tryEmit("The active business cannot be deleted from the calculator")
+                    return@runCatching
+                }
                 repo.deleteBusinessData(data)
                 repo.deleteAllCalculationResults(data.id)
                 loadSavedScenarios()
             }.onFailure {
-                _errorMsg.emit("Delete failed: ${it.localizedMessage}")
+                _errorMsg.tryEmit("Delete failed: ${it.localizedMessage}")
             }
         }
     }
 
     private fun loadSavedScenarios() {
         viewModelScope.launch {
-            repo.getAllBusinessData().collect { _savedScenarios.value = it }
+            try {
+                val activeBusinessId = businessContext.activeBusinessId.first()
+                repo.getAllBusinessData().collect { scenarios ->
+                    // Hide the live business profile: this screen manages calculator
+                    // scenarios only, and offering the business here invites accidents.
+                    _savedScenarios.value = scenarios.filterNot { it.id == activeBusinessId }
+                }
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                _savedScenarios.value = emptyList()
+            }
         }
     }
 }

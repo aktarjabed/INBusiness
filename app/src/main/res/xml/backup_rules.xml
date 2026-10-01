@@ -1,5 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+    Android 11 and below full-backup rules (see data_extraction_rules.xml for 12+).
+
+    The encrypted database and its passphrase are excluded, and so is everything
+    else: a partial restore (business/user identifiers without the encrypted
+    database) leaves the app pointing at data that cannot be opened. Automatic
+    backup is disabled at the manifest level; these rules keep the behaviour
+    explicit and consistent across all supported API levels.
+-->
 <full-backup-content>
+    <exclude domain="root" path="." />
+    <exclude domain="file" path="." />
+    <exclude domain="database" path="." />
+    <exclude domain="sharedpref" path="." />
+    <exclude domain="external" path="." />
+
+    <!-- Explicit safety nets: never back up the SQLCipher database or its key material. -->
     <exclude domain="sharedpref" path="inbusiness_secure_prefs.xml" />
     <exclude domain="database" path="inbusiness_ultra.db" />
     <exclude domain="database" path="inbusiness_ultra.db-wal" />
