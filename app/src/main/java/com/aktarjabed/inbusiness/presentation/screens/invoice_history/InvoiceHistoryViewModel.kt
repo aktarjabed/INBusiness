@@ -62,6 +62,11 @@ class InvoiceHistoryViewModel @Inject constructor(
         loadInvoices(reset = true)
     }
 
+    fun onDocumentTypeChanged(documentType: String?) {
+        _uiState.update { it.copy(documentType = documentType) }
+        loadInvoices(reset = true)
+    }
+
     fun loadMore() {
         if (!_uiState.value.isLoading && !_uiState.value.isEndOfList) {
             loadInvoices(reset = false)

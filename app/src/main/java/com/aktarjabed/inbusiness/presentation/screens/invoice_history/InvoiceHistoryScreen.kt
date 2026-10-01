@@ -8,16 +8,17 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.Receipt
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.aktarjabed.inbusiness.data.entities.Invoice
-import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -80,7 +81,9 @@ fun InvoiceHistoryScreen(
             if (showFilters) {
                 FilterPanel(
                     currentStatus = uiState.status,
-                    onStatusChanged = { viewModel.onStatusChanged(it) }
+                    currentDocType = uiState.documentType,
+                    onStatusChanged = { viewModel.onStatusChanged(it) },
+                    onDocTypeChanged = { viewModel.onDocumentTypeChanged(it) }
                 )
             }
 
@@ -116,11 +119,20 @@ fun InvoiceHistoryScreen(
                         modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(
-                            "No invoices found",
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(
+                                imageVector = Icons.Default.Receipt,
+                                contentDescription = null,
+                                modifier = Modifier.size(64.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                            )
+                            Spacer(Modifier.height(16.dp))
+                            Text(
+                                "No invoices found",
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
                 else -> {
@@ -161,7 +173,7 @@ fun InvoiceHistoryScreen(
                                         .padding(16.dp),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                    textAlign = TextAlign.Center
                                 )
                             }
                         }
@@ -175,7 +187,9 @@ fun InvoiceHistoryScreen(
 @Composable
 private fun FilterPanel(
     currentStatus: String?,
-    onStatusChanged: (String?) -> Unit
+    currentDocType: String?,
+    onStatusChanged: (String?) -> Unit,
+    onDocTypeChanged: (String?) -> Unit
 ) {
     Card(
         modifier = Modifier
@@ -184,14 +198,12 @@ private fun FilterPanel(
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
             Text(
-                "Status Filter",
+                "Status",
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.Bold
             )
             Spacer(Modifier.height(8.dp))
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilterChip(
                     selected = currentStatus == null,
                     onClick = { onStatusChanged(null) },
@@ -206,6 +218,34 @@ private fun FilterPanel(
                     selected = currentStatus == "CANCELLED",
                     onClick = { onStatusChanged("CANCELLED") },
                     label = { Text("Cancelled") }
+                )
+            }
+
+            Spacer(Modifier.height(12.dp))
+            HorizontalDivider()
+            Spacer(Modifier.height(12.dp))
+
+            Text(
+                "Document Type",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = currentDocType == null,
+                    onClick = { onDocTypeChanged(null) },
+                    label = { Text("All") }
+                )
+                FilterChip(
+                    selected = currentDocType == "TAX_INVOICE",
+                    onClick = { onDocTypeChanged("TAX_INVOICE") },
+                    label = { Text("Tax Invoice") }
+                )
+                FilterChip(
+                    selected = currentDocType == "BILL_OF_SUPPLY",
+                    onClick = { onDocTypeChanged("BILL_OF_SUPPLY") },
+                    label = { Text("Bill of Supply") }
                 )
             }
         }
@@ -237,7 +277,12 @@ private fun InvoiceHistoryCard(
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold
                 )
-                StatusChip(status = invoice.status)
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    if (invoice.documentType.isNotBlank()) {
+                        DocumentTypeChip(type = invoice.documentType)
+                    }
+                    StatusChip(status = invoice.status)
+                }
             }
 
             Spacer(Modifier.height(4.dp))
@@ -246,14 +291,33 @@ private fun InvoiceHistoryCard(
                 text = invoice.customerName,
                 style = MaterialTheme.typography.bodyLarge
             )
+            if (!invoice.customerGSTIN.isNullOrBlank()) {
+                Text(
+                    text = "GSTIN: ${invoice.customerGSTIN}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
 
             Spacer(Modifier.height(4.dp))
 
-            Text(
-                text = dateFormatter.format(invoice.createdAt),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = dateFormatter.format(invoice.createdAt),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (invoice.supplyType.isNotBlank()) {
+                    Text(
+                        text = invoice.supplyType.replace("_", " "),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
 
             Spacer(Modifier.height(8.dp))
             HorizontalDivider()
@@ -315,11 +379,37 @@ private fun StatusChip(status: String) {
 
     Surface(
         color = color,
-        shape = MaterialTheme.shapes.small,
-        modifier = Modifier.padding(start = 8.dp)
+        shape = MaterialTheme.shapes.small
     ) {
         Text(
             text = status,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            style = MaterialTheme.typography.labelSmall,
+            color = textColor,
+            fontWeight = FontWeight.Medium
+        )
+    }
+}
+
+@Composable
+private fun DocumentTypeChip(type: String) {
+    val label = when (type) {
+        "TAX_INVOICE" -> "TAX"
+        "BILL_OF_SUPPLY" -> "BOS"
+        else -> type.replace("_", " ")
+    }
+    val (color, textColor) = when (type) {
+        "TAX_INVOICE" -> MaterialTheme.colorScheme.tertiaryContainer to MaterialTheme.colorScheme.onTertiaryContainer
+        "BILL_OF_SUPPLY" -> MaterialTheme.colorScheme.secondaryContainer to MaterialTheme.colorScheme.onSecondaryContainer
+        else -> MaterialTheme.colorScheme.surfaceVariant to MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
+    Surface(
+        color = color,
+        shape = MaterialTheme.shapes.small
+    ) {
+        Text(
+            text = label,
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
             style = MaterialTheme.typography.labelSmall,
             color = textColor,
