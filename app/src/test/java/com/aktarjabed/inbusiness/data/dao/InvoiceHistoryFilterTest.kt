@@ -46,7 +46,9 @@ class InvoiceHistoryFilterTest {
     fun alwaysScopesToTheActiveBusiness() {
         val q = builtQuery()
         assertTrue(q.sql.startsWith("SELECT * FROM invoices WHERE businessId = ?"))
-        assertEquals(listOf<Any?>("biz-1"), q.args)
+        // The business id is always the first bind argument; pagination binds follow it.
+        assertEquals("biz-1", q.args.first())
+        assertEquals(listOf<Any?>("biz-1", 50, 0), q.args)
         assertTrue(q.sql.endsWith("ORDER BY createdAt DESC LIMIT ? OFFSET ?"))
     }
 
