@@ -94,7 +94,61 @@ jobs:
         if-no-files-found: warn
 
     - name: Run Unit Tests
-      run: ./gradlew testDebugUnitTest --stacktrace --console=plain 2>&1 | tee unit-test.log
+      # --no-build-cache forces real execution: a task served entirely from the build
+      # cache writes no JUnit XML, so the verification step below could not tell the
+      # difference between "tests passed" and "tests never ran".
+      run: ./gradlew testDebugUnitTest --no-build-cache --stacktrace --console=plain 2>&1 | tee unit-test.log
+
+    # A green test step is worthless if the task was skipped or discovered no tests.
+    # This gate asserts the JUnit XML exists, that the security/regression suites really
+    # executed, and that the run is clean.
+    - name: Verify unit tests actually executed
+      shell: bash
+      run: |
+        results_dir=app/build/test-results/testDebugUnitTest
+        if [[ ! -d "$results_dir" ]]; then
+          echo "::error title=Unit tests produced no results::$results_dir does not exist - the test task did not run."
+          exit 1
+        fi
+        python3 - <<'PY'
+        import glob, os, sys, xml.etree.ElementTree as ET
+
+        files = sorted(glob.glob('app/build/test-results/testDebugUnitTest/TEST-*.xml'))
+        total = failures = errors = skipped = 0
+        for path in files:
+            root = ET.parse(path).getroot()
+            total += int(root.get('tests', 0) or 0)
+            failures += int(root.get('failures', 0) or 0)
+            errors += int(root.get('errors', 0) or 0)
+            skipped += int(root.get('skipped', 0) or 0)
+        print(f"Unit tests: {total} cases in {len(files)} classes "
+              f"({failures} failures, {errors} errors, {skipped} skipped)")
+
+        required = [
+            'BackupPolicyTest',
+            'PdfCacheManagerTest',
+            'InvoiceHistoryFilterTest',
+            'RequestFingerprintTest',
+            'SystemClockTest',
+            'AppDateUtilsTest',
+        ]
+        names = {os.path.basename(f) for f in files}
+        missing = [cls for cls in required if not any(cls in n for n in names)]
+
+        problems = []
+        if not files:
+            problems.append('no JUnit XML was produced')
+        if total == 0:
+            problems.append('zero test cases executed')
+        if failures or errors:
+            problems.append(f'{failures} failures / {errors} errors')
+        if missing:
+            problems.append('missing critical suites: ' + ', '.join(missing))
+        if problems:
+            for problem in problems:
+                print(f"::error title=Unit test verification failed::{problem}")
+            sys.exit(1)
+        PY
 
     - name: Report unit test failure details
       if: failure()
@@ -107,7 +161,15 @@ jobs:
         fi
 
     - name: Run Android Lint
-      run: ./gradlew lintDebug --stacktrace --console=plain 2>&1 | tee lint.log
+      run: ./gradlew lintDebug --no-build-cache --stacktrace --console=plain 2>&1 | tee lint.log
+
+    - name: Verify lint report was produced
+      shell: bash
+      run: |
+        if [[ ! -s app/build/reports/lint-results-debug.html ]]; then
+          echo "::error title=Android lint produced no report::app/build/reports/lint-results-debug.html is missing or empty - lint did not execute."
+          exit 1
+        fi
 
     - name: Report lint failure details
       if: failure()
@@ -143,7 +205,10 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: unit-test-reports
-        path: app/build/reports/tests/testDebugUnitTest/
+        path: |
+          app/build/reports/tests/testDebugUnitTest/
+          app/build/test-results/testDebugUnitTest/
+        if-no-files-found: error
 
     - name: Upload Lint Reports
       if: always()
@@ -151,6 +216,7 @@ jobs:
       with:
         name: lint-reports
         path: app/build/reports/lint-results-debug.html
+        if-no-files-found: error
 
   instrumented-tests:
     name: Instrumented Tests
@@ -184,7 +250,35 @@ jobs:
         target: google_apis
         emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
         disable-animations: true
-        script: ./gradlew connectedDebugAndroidTest --stacktrace --console=plain 2>&1 | tee instrumentation.log
+        script: ./gradlew connectedDebugAndroidTest --no-build-cache --stacktrace --console=plain 2>&1 | tee instrumentation.log
+
+    - name: Verify instrumented tests actually executed
+      shell: bash
+      run: |
+        results=$(find app/build/outputs/androidTest-results -name 'TEST-*.xml' 2>/dev/null | wc -l)
+        if [[ "$results" -eq 0 ]]; then
+          echo "::error title=Instrumented tests produced no results::No JUnit XML under app/build/outputs/androidTest-results - the connected run did not execute tests."
+          find app/build -maxdepth 4 -type d 2>/dev/null | head -40 || true
+          exit 1
+        fi
+        python3 - <<'PY'
+        import glob, sys, xml.etree.ElementTree as ET
+
+        files = sorted(glob.glob('app/build/outputs/androidTest-results/**/TEST-*.xml', recursive=True))
+        total = failures = errors = skipped = 0
+        for path in files:
+            root = ET.parse(path).getroot()
+            total += int(root.get('tests', 0) or 0)
+            failures += int(root.get('failures', 0) or 0)
+            errors += int(root.get('errors', 0) or 0)
+            skipped += int(root.get('skipped', 0) or 0)
+        print(f"Instrumented tests: {total} cases in {len(files)} classes "
+              f"({failures} failures, {errors} errors, {skipped} skipped)")
+        if total == 0:
+            sys.exit('::error title=Instrumented test verification failed::zero test cases executed')
+        if failures or errors:
+            sys.exit(f"::error title=Instrumented test verification failed::{failures} failures / {errors} errors")
+        PY
 
     - name: Report instrumented test failure details
       if: failure()
@@ -201,4 +295,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: instrumented-test-reports
-        path: app/build/reports/androidTests/connected/
+        path: |
+          app/build/reports/androidTests/connected/
+          app/build/outputs/androidTest-results/
+        if-no-files-found: error
