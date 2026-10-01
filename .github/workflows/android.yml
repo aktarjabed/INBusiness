@@ -49,7 +49,10 @@ jobs:
       shell: bash
       run: |
         if [[ -f gradle-build.log ]]; then
-          tail -n 40 gradle-build.log
+          echo "--- first errors in gradle-build.log ---"
+          grep -n -m 25 -E '^(e: |error:|w: .*error|FAILURE:|> Task .*FAILED|Execution failed for task|\* What went wrong:|Caused by:|Exception)' gradle-build.log || true
+          echo "--- end of gradle-build.log ---"
+          tail -n 25 gradle-build.log
           summary=$(tail -n 30 gradle-build.log | sed -e 's/%/%25/g' -e 's/\r/%0D/g' | paste -sd ' ' -)
           echo "::error title=Gradle build diagnostics::$summary"
         fi
@@ -155,7 +158,10 @@ jobs:
       shell: bash
       run: |
         if [[ -f unit-test.log ]]; then
-          tail -n 40 unit-test.log
+          echo "--- first errors in unit-test.log ---"
+          grep -n -m 25 -E '^(e: |error:|w: .*error|FAILURE:|> Task .*FAILED|Execution failed for task|\* What went wrong:|Caused by:|Exception)' unit-test.log || true
+          echo "--- end of unit-test.log ---"
+          tail -n 25 unit-test.log
           summary=$(tail -n 30 unit-test.log | sed -e 's/%/%25/g' -e 's/\r/%0D/g' | paste -sd ' ' -)
           echo "::error title=Unit test diagnostics::$summary"
         fi
@@ -176,7 +182,10 @@ jobs:
       shell: bash
       run: |
         if [[ -f lint.log ]]; then
-          tail -n 40 lint.log
+          echo "--- first errors in lint.log ---"
+          grep -n -m 25 -E '^(e: |error:|w: .*error|FAILURE:|> Task .*FAILED|Execution failed for task|\* What went wrong:|Caused by:|Exception)' lint.log || true
+          echo "--- end of lint.log ---"
+          tail -n 25 lint.log
           summary=$(tail -n 30 lint.log | sed -e 's/%/%25/g' -e 's/\r/%0D/g' | paste -sd ' ' -)
           echo "::error title=Android lint diagnostics::$summary"
         fi
@@ -217,6 +226,18 @@ jobs:
         name: lint-reports
         path: app/build/reports/lint-results-debug.html
         if-no-files-found: error
+
+    - name: Upload Gradle logs
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: gradle-logs
+        path: |
+          gradle-build.log
+          room-schema.log
+          unit-test.log
+          lint.log
+        if-no-files-found: warn
 
   instrumented-tests:
     name: Instrumented Tests
@@ -285,8 +306,11 @@ jobs:
       shell: bash
       run: |
         if [[ -f instrumentation.log ]]; then
-          tail -n 50 instrumentation.log
-          summary=$(tail -n 35 instrumentation.log | sed -e 's/%/%25/g' -e 's/\r/%0D/g' | paste -sd ' ' -)
+          echo "--- first errors in instrumentation.log ---"
+          grep -n -m 25 -E '^(e: |error:|w: .*error|FAILURE:|> Task .*FAILED|Execution failed for task|\* What went wrong:|Caused by:|Exception)' instrumentation.log || true
+          echo "--- end of instrumentation.log ---"
+          tail -n 25 instrumentation.log
+          summary=$(tail -n 30 instrumentation.log | sed -e 's/%/%25/g' -e 's/\r/%0D/g' | paste -sd ' ' -)
           echo "::error title=Instrumented test diagnostics::$summary"
         fi
 
@@ -299,3 +323,11 @@ jobs:
           app/build/reports/androidTests/connected/
           app/build/outputs/androidTest-results/
         if-no-files-found: error
+
+    - name: Upload Instrumented log
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: instrumentation-log
+        path: instrumentation.log
+        if-no-files-found: warn
