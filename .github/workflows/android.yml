@@ -38,7 +38,17 @@ jobs:
         fi
 
     - name: Run Unit Tests
-      run: ./gradlew testDebugUnitTest
+      run: ./gradlew testDebugUnitTest --stacktrace --console=plain 2>&1 | tee unit-test.log
+
+    - name: Report unit test failure details
+      if: failure()
+      shell: bash
+      run: |
+        if [[ -f unit-test.log ]]; then
+          tail -n 40 unit-test.log
+          summary=$(tail -n 30 unit-test.log | sed -e 's/%/%25/g' -e 's/\r/%0D/g' | paste -sd ' ' -)
+          echo "::error title=Unit test diagnostics::$summary"
+        fi
 
     - name: Run Android Lint
       run: ./gradlew lintDebug
