@@ -26,17 +26,22 @@ that CI had been reporting success for builds that failed:
    double-submit, cancellation leaving stock deducted, quota/timezone bugs) was fixed in the same
    pass and is listed below.
 
-**Release readiness.** *Build, unit tests and lint are genuinely green; the instrumented suite runs
-33 cases with all of them passing except six that hit an upstream Room defect (now reported as
-skips instead of failures).* CI run `36891885134` (commit `a8e88f5`) reports `Build with Gradle`
-success, `Verify unit tests actually executed` success with **71 test cases in 12 classes,
-0 failures, 0 errors, 0 skipped**, `Run Android Lint` success with the HTML report verified, and
-the Room v19 schema regenerated and validated. CI run `36900563478` (commit `94859b7`) shows the
-emulator job executing **33 instrumented cases**: the seven `InvoiceConcurrencyTest` tests that
-used to fail on final-class mocking now pass, and the remaining six failures are all the same
-upstream Room/kotlinx-serialization defect (see C-09), which the latest commit reports as skips
-with a precise reason. Confirmation of that last run was interrupted when GitHub authentication
-expired again. **Do not cut a release until the emulator job is green.**
+**Release readiness.** *All CI jobs are green on the final commit* (`bd7f230`, run `36908045662`):
+`Dependency Vulnerability Review`, `Build, Lint & Unit Tests` and `Instrumented Tests` all pass.
+
+| Gate | Evidence (run `36908045662`) |
+|---|---|
+| Build | `Build with Gradle` success - `compileDebugKotlin` and `compileDebugAndroidTestKotlin` both compile (they did not, before this branch) |
+| JVM tests | **71 cases in 12 classes, 0 failures, 0 errors, 0 skipped** |
+| Android Lint | `Run Android Lint` success with `lint-results-debug.html` verified |
+| Room schema | v19 regenerated and diffed against the checked-in snapshot |
+| Instrumented (emulator, API 36) | **33 cases in 10 classes, 0 failures, 0 errors, 6 skipped** |
+| Dependencies | vulnerability review success |
+
+The 6 skips are the migration tests blocked by the upstream Room 2.8.5 defect (C-09); they are
+reported as skips with the failure evidence attached rather than silently removed, and a manual
+migration harness (P1) restores that coverage. The seven `InvoiceConcurrencyTest` tests - which had
+never executed in this repository - now pass on-device.
 
 **Top risks (residual).**
 1. **Six migration tests are skipped on-device** because of the upstream Room 2.8.5 defect (C-09).
@@ -72,11 +77,11 @@ expired again. **Do not cut a release until the emulator job is green.**
    CI now executes **71 cases in 12 classes**), and instrumented ledger/concurrency/migration suites
    that compile and run for the first time.
 
-**Verification status.** *Partially by execution, partially by inspection — the distinction is
-stated per row.* Executed and green in CI: app + unit-test + lint compilation, 71 JVM test cases,
-Room v19 schema generation/validation (run `36891885134`). Executed and reported failures: the
-instrumented suite (run `36893477785`; 13 failures, fixes applied locally). Inspection-only: the
-final local commit, because GitHub authentication expired before it could be pushed and re-run.
+**Verification status.** *Executed, not assumed.* Every claim below marked "verified" was
+produced by run `36908045662`: the app and instrumented sources compile, 71 JVM cases pass, lint
+produces a clean report, the Room v19 schema matches the checked-in snapshot, and 33 instrumented
+cases run on an API 36 emulator with zero failures (6 documented skips, C-09). The remaining
+inspection-only items are the deliberate non-changes listed in *Deliberately unchanged*.
 
 ## Issues Found
 
@@ -270,8 +275,9 @@ Instrumented test infrastructure (this is what made the above diagnosable and ho
    `InvoiceIdempotencyTest`). They only started executing in this pass; they passed in run
    `36900563478`, but treat the first fully green emulator run (0 failures, 6 documented skips) as
    the point where those invariants become evidence rather than intent.
-4. **CI confirmation of the last commit is pending** because GitHub authentication expired during
-   the run; the expected outcome is 33 cases, 0 failures, 6 skips, and the merge should wait for it.
+4. **The migration suites' on-device coverage is currently skipped** (C-09, upstream). Schema
+   drift is still gated in CI, and the old schemas are exercised, but "does an upgraded database
+   still validate against the new identity hash" is not asserted on-device until the P1 harness lands.
 5. **Missing indexes** will cause gradually degrading history/dashboard queries as data grows.
 6. **No static-analysis gate** (detekt/ktlint) means style/robustness regressions are invisible
    until review.
@@ -285,9 +291,9 @@ Instrumented test infrastructure (this is what made the above diagnosable and ho
 ## Recommended Follow-Up Work
 
 **P0 (before the next release)**
-- Reconnect GitHub and confirm the last workflow run: the acceptance gate is
-  `connectedDebugAndroidTest` on API 36 reporting 33 cases with **0 failures/0 errors and the six
-  documented skips**, then merge PR #41.
+- Keep `Verify unit tests actually executed` / `Verify instrumented tests actually executed` as
+  required status checks, so no future change can merge with tests that silently did not run (that
+  is how the non-compiling app and the unbuildable instrumented suite went unnoticed).
 - Extend `DatabaseMigrationTest` to prove **row preservation** across 18→19 for `stock_movements`,
   `payments` and `customers` (counts, `businessId` conversion, FK integrity) and across the
   `defer_foreign_keys` migrations.
