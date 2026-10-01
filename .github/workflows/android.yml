@@ -49,7 +49,10 @@ jobs:
       if: steps.generate_room_schema.outcome == 'failure'
       shell: bash
       run: |
-        details=$(grep -E '(^FAILURE:|^\* What went wrong:|^Execution failed|^> |^Caused by:|^e: |^error:)' room-schema.log | tail -n 25 || true)
+        details=$(grep -A 18 'An issue was found when checking AAR metadata:' room-schema.log | head -n 19 || true)
+        if [[ -z "$details" ]]; then
+          details=$(grep -E '(^FAILURE:|^\* What went wrong:|^Execution failed|^> |^Caused by:|^e: |^error:)' room-schema.log | tail -n 25 || true)
+        fi
         if [[ -z "$details" ]]; then
           details=$(tail -n 20 room-schema.log)
         fi
