@@ -37,6 +37,13 @@ jobs:
           echo "::error title=Gradle build diagnostics::$summary"
         fi
 
+    - name: Preserve checked-in Room v19 schema
+      shell: bash
+      run: |
+        schema_path=app/schemas/com.aktarjabed.inbusiness.data.database.AppDatabase/19.json
+        cp "$schema_path" "$RUNNER_TEMP/room-v19-expected.json"
+        rm "$schema_path"
+
     - name: Generate Room v19 schema
       id: generate_room_schema
       continue-on-error: true
@@ -108,21 +115,10 @@ jobs:
           echo "::error file=.github/workflows/android.yml::Room v19 schema is missing after the Kapt export."
           exit 1
         fi
-
-    - name: Emit temporary Room v19 schema payload
-      if: always()
-      shell: bash
-      run: |
-        schema_path=app/schemas/com.aktarjabed.inbusiness.data.database.AppDatabase/19.json
-        if [[ -s "$schema_path" ]]; then
-          payload=$(gzip -n -c "$schema_path" | base64 -w 0)
-          chunk_size=3000
-          chunk_count=$(( (${#payload} + chunk_size - 1) / chunk_size ))
-          for ((index = 0; index < chunk_count; index++)); do
-            chunk=${payload:$((index * chunk_size)):chunk_size}
-            part=$((index + 1))
-            echo "::warning title=Temporary Room v19 schema payload ${part}/${chunk_count}::ROOM_V19_SCHEMA_GZ_B64_PART_${part}_OF_${chunk_count}=$chunk"
-          done
+        if ! cmp -s "$schema_path" "$RUNNER_TEMP/room-v19-expected.json"; then
+          diff -u "$RUNNER_TEMP/room-v19-expected.json" "$schema_path" || true
+          echo "::error file=.github/workflows/android.yml::Generated Room v19 schema differs from the checked-in snapshot."
+          exit 1
         fi
 
     - name: Upload Unit Test Reports
