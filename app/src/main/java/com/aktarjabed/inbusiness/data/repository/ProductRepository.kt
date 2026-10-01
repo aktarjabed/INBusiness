@@ -1,7 +1,11 @@
 package com.aktarjabed.inbusiness.data.repository
 
+import androidx.room.withTransaction
 import com.aktarjabed.inbusiness.data.dao.ProductDao
+import com.aktarjabed.inbusiness.data.dao.StockMovementDao
+import com.aktarjabed.inbusiness.data.database.AppDatabase
 import com.aktarjabed.inbusiness.data.entities.Product
+import com.aktarjabed.inbusiness.data.entities.StockMovement
 import com.aktarjabed.inbusiness.domain.context.BusinessContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -18,6 +22,8 @@ sealed class StockDeductionResult {
 @Singleton
 class ProductRepository @Inject constructor(
     private val productDao: ProductDao,
+    private val stockMovementDao: StockMovementDao,
+    private val database: AppDatabase,
     private val businessContext: BusinessContext
 ) {
     fun getAllProducts(): Flow<List<Product>> = businessContext.activeBusinessId.flatMapLatest { businessId ->
@@ -55,15 +61,18 @@ class ProductRepository @Inject constructor(
         availableStock: Double,
         batchNumber: String?,
         isWholesaleOnly: Boolean,
-        gstPercentage: Double
+        gstPercentage: Double,
+        reorderThreshold: Double = 0.0
     ): Long {
         val businessId = businessContext.activeBusinessId.first()
         require(name.isNotBlank()) { "Name cannot be blank" }
         require(brand.isNotBlank()) { "Brand cannot be blank" }
         require(category.isNotBlank()) { "Category cannot be blank" }
         require(unitType.isNotBlank()) { "Unit type cannot be blank" }
-        require(pricePerUnit >= 0) { "Price cannot be negative" }
-        require(availableStock >= 0) { "Stock cannot be negative" }
+        require(pricePerUnit.isFinite() && pricePerUnit >= 0.0) { "Price must be finite and cannot be negative" }
+        require(availableStock.isFinite() && availableStock >= 0.0) { "Stock must be finite and cannot be negative" }
+        require(gstPercentage.isFinite() && gstPercentage >= 0.0) { "GST percentage must be finite and cannot be negative" }
+        require(reorderThreshold.isFinite() && reorderThreshold >= 0.0) { "Reorder threshold must be finite and cannot be negative" }
 
         val trimmedName = name.trim()
         val trimmedBrand = brand.trim()
@@ -71,54 +80,107 @@ class ProductRepository @Inject constructor(
         val trimmedUnitType = unitType.trim()
         val trimmedBatchNumber = batchNumber?.trim()?.takeIf { it.isNotBlank() } ?: ""
 
-        return if (id == 0L) {
-            val product = Product(
-                id = id,
-                businessId = businessId,
-                name = trimmedName,
-                brand = trimmedBrand,
-                category = trimmedCategory,
-                unitType = trimmedUnitType,
-                pricePerUnit = pricePerUnit,
-                availableStock = availableStock,
-                batchNumber = trimmedBatchNumber,
-                isWholesaleOnly = isWholesaleOnly,
-                gstPercentage = gstPercentage
-            )
-            productDao.insertProduct(product)
-        } else {
-            val rowsAffected = productDao.updateProduct(
-                id = id,
-                businessId = businessId,
-                name = trimmedName,
-                brand = trimmedBrand,
-                category = trimmedCategory,
-                unitType = trimmedUnitType,
-                pricePerUnit = pricePerUnit,
-                availableStock = availableStock,
-                batchNumber = trimmedBatchNumber,
-                isWholesaleOnly = isWholesaleOnly,
-                gstPercentage = gstPercentage
-            )
-            if (rowsAffected == 0) {
-                throw IllegalStateException("Failed to update product. It may not exist or belongs to another business.")
+        return database.withTransaction {
+            if (id == 0L) {
+                val productId = productDao.insertProduct(
+                    Product(
+                        id = 0L,
+                        businessId = businessId,
+                        name = trimmedName,
+                        brand = trimmedBrand,
+                        category = trimmedCategory,
+                        unitType = trimmedUnitType,
+                        pricePerUnit = pricePerUnit,
+                        availableStock = availableStock,
+                        batchNumber = trimmedBatchNumber,
+                        isWholesaleOnly = isWholesaleOnly,
+                        gstPercentage = gstPercentage,
+                        reorderThreshold = reorderThreshold
+                    )
+                )
+                if (availableStock > 0.0) {
+                    stockMovementDao.insertMovement(
+                        StockMovement(
+                            businessId = businessId,
+                            productId = productId,
+                            movementType = "OPENING_STOCK",
+                            quantity = availableStock,
+                            stockBefore = 0.0,
+                            stockAfter = availableStock,
+                            referenceType = "PRODUCT",
+                            referenceId = productId.toString(),
+                            reason = "Opening stock"
+                        )
+                    )
+                }
+                productId
+            } else {
+                val existingProduct = productDao.getProductById(id, businessId)
+                    ?: throw IllegalStateException("Product does not exist or belongs to another business.")
+
+                val rowsAffected = productDao.updateProduct(
+                    id = id,
+                    businessId = businessId,
+                    name = trimmedName,
+                    brand = trimmedBrand,
+                    category = trimmedCategory,
+                    unitType = trimmedUnitType,
+                    pricePerUnit = pricePerUnit,
+                    availableStock = availableStock,
+                    batchNumber = trimmedBatchNumber,
+                    isWholesaleOnly = isWholesaleOnly,
+                    gstPercentage = gstPercentage,
+                    reorderThreshold = reorderThreshold
+                )
+                if (rowsAffected == 0) {
+                    throw IllegalStateException("Failed to update product. It may not exist or belongs to another business.")
+                }
+
+                val stockDelta = availableStock - existingProduct.availableStock
+                if (stockDelta != 0.0) {
+                    stockMovementDao.insertMovement(
+                        StockMovement(
+                            businessId = businessId,
+                            productId = id,
+                            movementType = "STOCK_ADJUSTMENT",
+                            quantity = stockDelta,
+                            stockBefore = existingProduct.availableStock,
+                            stockAfter = availableStock,
+                            referenceType = "PRODUCT",
+                            referenceId = id.toString(),
+                            reason = "Stock adjusted through product edit"
+                        )
+                    )
+                }
+                id
             }
-            id
         }
     }
 
     suspend fun deductStock(productId: Long, quantity: Double): StockDeductionResult {
         val businessId = businessContext.activeBusinessId.first()
-        require(quantity > 0) { "Deduction quantity must be strictly positive" }
-        val affectedRows = productDao.deductStock(productId, businessId, quantity)
-        return if (affectedRows > 0) {
-            StockDeductionResult.Success
-        } else {
+        require(quantity.isFinite() && quantity > 0.0) { "Deduction quantity must be finite and strictly positive" }
+        return database.withTransaction {
             val product = productDao.getProductById(productId, businessId)
-            if (product == null) {
-                StockDeductionResult.NotFound
-            } else {
+                ?: return@withTransaction StockDeductionResult.NotFound
+            val affectedRows = productDao.deductStock(productId, businessId, quantity)
+            if (affectedRows == 0) {
                 StockDeductionResult.InsufficientStock
+            } else {
+                stockMovementDao.insertMovement(
+                    StockMovement(
+                        businessId = businessId,
+                        productId = productId,
+                        movementType = "STOCK_DEDUCTION",
+                        quantity = -quantity,
+                        stockBefore = product.availableStock,
+                        stockAfter = product.availableStock - quantity,
+                        referenceType = "MANUAL",
+                        referenceId = java.util.UUID.randomUUID().toString(),
+                        reason = "Manual stock deduction"
+                    )
+                )
+                StockDeductionResult.Success
             }
         }
     }
@@ -127,7 +189,7 @@ class ProductRepository @Inject constructor(
         val businessId = businessContext.activeBusinessId.first()
         val rowsAffected = productDao.deleteProduct(productId, businessId)
         if (rowsAffected == 0) {
-             throw IllegalStateException("Failed to delete product. It may not exist or belongs to another business.")
+            throw IllegalStateException("Failed to delete product. It may not exist or belongs to another business.")
         }
     }
 }

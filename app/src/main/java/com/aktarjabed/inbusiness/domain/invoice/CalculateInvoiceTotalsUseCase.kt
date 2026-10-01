@@ -14,6 +14,11 @@ class CalculateInvoiceTotalsUseCase @Inject constructor() {
         if (items.isEmpty()) {
             throw IllegalArgumentException("Invoice must have at least one item")
         }
+        require(amountPaid.isFinite() && amountPaid >= 0.0) { "Amount paid must be finite and non-negative" }
+        val normalizedAmountPaid = BigDecimal.valueOf(amountPaid).setScale(2, RoundingMode.HALF_UP)
+        require(amountPaid == 0.0 || normalizedAmountPaid.signum() > 0) {
+            "Initial payment must be at least ₹0.01"
+        }
 
         var totalSubtotal = BigDecimal.ZERO
         var totalTax = BigDecimal.ZERO
@@ -53,14 +58,15 @@ class CalculateInvoiceTotalsUseCase @Inject constructor() {
             )
         }
 
-        if (amountPaid < 0) throw IllegalArgumentException("Amount paid cannot be negative")
-
         val totalAmountDouble = totalAmount.setScale(2, RoundingMode.HALF_UP).toDouble()
-        if (amountPaid > totalAmountDouble) {
+        if (normalizedAmountPaid > BigDecimal.valueOf(totalAmountDouble)) {
             throw IllegalArgumentException("Amount paid cannot exceed total amount")
         }
 
-        val balanceDue = BigDecimal.valueOf(totalAmountDouble).subtract(BigDecimal.valueOf(amountPaid)).setScale(2, RoundingMode.HALF_UP).toDouble()
+        val balanceDue = BigDecimal.valueOf(totalAmountDouble)
+            .subtract(normalizedAmountPaid)
+            .setScale(2, RoundingMode.HALF_UP)
+            .toDouble()
 
         return InvoiceCalculationResult(
             processedItems = processedItems,
@@ -70,7 +76,7 @@ class CalculateInvoiceTotalsUseCase @Inject constructor() {
             totalCgst = totalCgst.setScale(2, RoundingMode.HALF_UP).toDouble(),
             totalSgst = totalSgst.setScale(2, RoundingMode.HALF_UP).toDouble(),
             totalIgst = totalIgst.setScale(2, RoundingMode.HALF_UP).toDouble(),
-            amountPaid = amountPaid,
+            amountPaid = normalizedAmountPaid.toDouble(),
             balanceDue = balanceDue
         )
     }

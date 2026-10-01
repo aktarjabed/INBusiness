@@ -4,4 +4,9 @@ import android.app.Application
 import dagger.hilt.android.HiltAndroidApp
 
 @HiltAndroidApp
-class InBusinessApp : Application()
+class InBusinessApp : Application() {
+    override fun onCreate() {
+        super.onCreate()
+        System.loadLibrary("sqlcipher")
+    }
+}

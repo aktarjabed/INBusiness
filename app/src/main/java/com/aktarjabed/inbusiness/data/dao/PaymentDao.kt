@@ -15,6 +15,9 @@ interface PaymentDao {
     @Query("SELECT SUM(amount) FROM payments WHERE invoiceId = :invoiceId AND businessId = :businessId AND status = 'SUCCESS'")
     suspend fun getTotalPaidForInvoice(businessId: String, invoiceId: String): Double?
 
+    @Query("SELECT EXISTS(SELECT 1 FROM payments WHERE invoiceId = :invoiceId AND businessId = :businessId AND status = 'SUCCESS')")
+    suspend fun hasSuccessfulPaymentForInvoice(businessId: String, invoiceId: String): Boolean
+
     @Query("SELECT * FROM payments WHERE invoiceId = :invoiceId AND businessId = :businessId ORDER BY paymentDate DESC")
     fun getPaymentsForInvoice(businessId: String, invoiceId: String): Flow<List<Payment>>
 }

@@ -72,10 +72,10 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.0")
 
     // Room
-    implementation("androidx.room:room-runtime:2.7.0-alpha05")
-    implementation("androidx.room:room-ktx:2.7.0-alpha05")
-    kapt("androidx.room:room-compiler:2.7.0-alpha05")
-    androidTestImplementation("androidx.room:room-testing:2.7.0-alpha05")
+    implementation("androidx.room:room-runtime:2.8.5")
+    implementation("androidx.room:room-ktx:2.8.5")
+    kapt("androidx.room:room-compiler:2.8.5")
+    androidTestImplementation("androidx.room:room-testing:2.8.5")
 
     // Hilt
     implementation("com.google.dagger:hilt-android:2.51")
@@ -93,9 +93,10 @@ dependencies {
     implementation("androidx.core:core-splashscreen:1.0.1")
 
     // Security & Crypto
-    implementation("androidx.security:security-crypto:1.1.0-alpha06")
-    implementation("net.zetetic:android-database-sqlcipher:4.5.4")
-    implementation("androidx.sqlite:sqlite-ktx:2.4.0")
+    implementation("androidx.security:security-crypto:1.1.0")
+    implementation("net.zetetic:sqlcipher-android:4.19.0")
+    implementation("androidx.sqlite:sqlite:2.7.0")
+    implementation("androidx.sqlite:sqlite-ktx:2.7.0")
 
     // Desugaring
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")

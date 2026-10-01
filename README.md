@@ -31,7 +31,7 @@ INBusiness is an offline-first Android application designed specifically for **J
 ## Technical Architecture
 
 - **API Level:** Targets Android API 36 / SDK 36.
-- **Tooling:** Kotlin 1.9+, Android Gradle Plugin 8.6.0.
+- **Tooling:** Kotlin 1.9+, Android Gradle Plugin 8.9.1 and Gradle 8.11.1.
 - **UI:** 100% Jetpack Compose.
 - **DI:** Hilt.
 - **Concurrency:** Kotlin Coroutines & Flow.

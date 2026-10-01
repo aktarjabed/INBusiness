@@ -74,7 +74,7 @@ jobs:
     - name: Run Instrumented Tests
       uses: reactivecircus/android-emulator-runner@v2
       with:
-        api-level: 30
+        api-level: 36
         arch: x86_64
         target: google_apis
         emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim

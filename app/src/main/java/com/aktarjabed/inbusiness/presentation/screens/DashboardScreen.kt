@@ -72,6 +72,7 @@ fun DashboardScreen(
     LazyColumn(
         Modifier
             .fillMaxSize()
+            .windowInsetsPadding(WindowInsets.safeDrawing)
             .padding(16.dp)
     ) {
         item {
