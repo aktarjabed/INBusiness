@@ -16,7 +16,6 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.aktarjabed.inbusiness.presentation.components.SearchableDropdownField
 import com.aktarjabed.inbusiness.presentation.viewmodel.ProductViewModel
 import com.aktarjabed.inbusiness.presentation.viewmodel.SaveProductState
-import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -25,12 +24,10 @@ fun ProductEntryScreen(
     onNavigateBack: () -> Unit,
     viewModel: ProductViewModel = hiltViewModel()
 ) {
-    val coroutineScope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
 
     val editingProduct by viewModel.editingProduct.collectAsState()
     val saveState by viewModel.saveState.collectAsState()
-
     val existingCategories by viewModel.existingCategories.collectAsState()
     val existingUnitTypes by viewModel.existingUnitTypes.collectAsState()
 
@@ -40,10 +37,10 @@ fun ProductEntryScreen(
     var unitType by remember { mutableStateOf("") }
     var pricePerUnitStr by remember { mutableStateOf("") }
     var availableStockStr by remember { mutableStateOf("") }
+    var reorderThresholdStr by remember { mutableStateOf("") }
     var batchNumber by remember { mutableStateOf("") }
     var isWholesaleOnly by remember { mutableStateOf(false) }
     var gstPercentageStr by remember { mutableStateOf("") }
-    var gstError by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(productId) {
         if (productId != null) {
@@ -54,17 +51,50 @@ fun ProductEntryScreen(
     }
 
     LaunchedEffect(editingProduct) {
-        editingProduct?.let {
-            name = it.name
-            brand = it.brand
-            category = it.category
-            unitType = it.unitType
-            pricePerUnitStr = it.pricePerUnit.toString()
-            availableStockStr = it.availableStock.toString()
-            batchNumber = it.batchNumber
-            isWholesaleOnly = it.isWholesaleOnly
-            gstPercentageStr = if (it.gstPercentage > 0.0) it.gstPercentage.toString() else ""
+        editingProduct?.let { product ->
+            name = product.name
+            brand = product.brand
+            category = product.category
+            unitType = product.unitType
+            pricePerUnitStr = product.pricePerUnit.toString()
+            availableStockStr = product.availableStock.toString()
+            reorderThresholdStr = product.reorderThreshold.toString()
+            batchNumber = product.batchNumber
+            isWholesaleOnly = product.isWholesaleOnly
+            gstPercentageStr = if (product.gstPercentage > 0.0) product.gstPercentage.toString() else ""
         }
+    }
+
+    val parsedPrice = pricePerUnitStr.toDoubleOrNull()
+    val priceError = when {
+        pricePerUnitStr.isBlank() -> "Price is required."
+        parsedPrice == null || !parsedPrice.isFinite() -> "Enter a finite price."
+        parsedPrice < 0.0 -> "Price cannot be negative."
+        else -> null
+    }
+
+    val parsedStock = availableStockStr.toDoubleOrNull()
+    val stockError = when {
+        availableStockStr.isBlank() -> "Stock is required."
+        parsedStock == null || !parsedStock.isFinite() -> "Enter a finite stock quantity."
+        parsedStock < 0.0 -> "Stock cannot be negative."
+        else -> null
+    }
+
+    val parsedReorderThreshold = if (reorderThresholdStr.isBlank()) 0.0 else reorderThresholdStr.toDoubleOrNull()
+    val reorderThresholdError = when {
+        reorderThresholdStr.isBlank() -> null
+        parsedReorderThreshold == null || !parsedReorderThreshold.isFinite() -> "Enter a finite reorder threshold."
+        parsedReorderThreshold < 0.0 -> "Reorder threshold cannot be negative."
+        else -> null
+    }
+
+    val parsedGstRate = if (gstPercentageStr.isBlank()) 0.0 else gstPercentageStr.toDoubleOrNull()
+    val gstError = when {
+        gstPercentageStr.isBlank() -> null
+        parsedGstRate == null || !parsedGstRate.isFinite() -> "Enter a finite GST percentage."
+        parsedGstRate < 0.0 -> "GST percentage cannot be negative."
+        else -> null
     }
 
     LaunchedEffect(saveState) {
@@ -74,11 +104,10 @@ fun ProductEntryScreen(
                 onNavigateBack()
             }
             is SaveProductState.Error -> {
-                val error = (saveState as SaveProductState.Error).message
-                snackbarHostState.showSnackbar(error)
+                snackbarHostState.showSnackbar((saveState as SaveProductState.Error).message)
                 viewModel.resetSaveState()
             }
-            else -> {}
+            else -> Unit
         }
     }
 
@@ -140,19 +169,33 @@ fun ProductEntryScreen(
                     label = { Text("Price per Unit") },
                     modifier = Modifier.weight(1f),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    singleLine = true
+                    singleLine = true,
+                    isError = priceError != null,
+                    supportingText = { if (priceError != null) Text(priceError) }
                 )
 
                 OutlinedTextField(
                     value = availableStockStr,
                     onValueChange = { availableStockStr = it },
-                    label = { Text("Initial Stock") },
+                    label = { Text(if (productId == null) "Opening Stock" else "Set Stock Quantity") },
                     modifier = Modifier.weight(1f),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    singleLine = true
+                    singleLine = true,
+                    isError = stockError != null,
+                    supportingText = { if (stockError != null) Text(stockError) }
                 )
             }
 
+            OutlinedTextField(
+                value = reorderThresholdStr,
+                onValueChange = { reorderThresholdStr = it },
+                label = { Text("Low-stock alert threshold (optional)") },
+                modifier = Modifier.fillMaxWidth(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                singleLine = true,
+                isError = reorderThresholdError != null,
+                supportingText = { if (reorderThresholdError != null) Text(reorderThresholdError) }
+            )
 
             OutlinedTextField(
                 value = batchNumber,
@@ -164,26 +207,14 @@ fun ProductEntryScreen(
 
             OutlinedTextField(
                 value = gstPercentageStr,
-                onValueChange = {
-                    gstPercentageStr = it
-                    gstError = null
-                    val d = it.toDoubleOrNull()
-                    if (it.isNotBlank()) {
-                        if (d == null || !d.isFinite()) {
-                            gstError = "Enter a valid GST percentage."
-                        } else if (d < 0) {
-                            gstError = "GST percentage cannot be negative."
-                        }
-                    }
-                },
+                onValueChange = { gstPercentageStr = it },
                 label = { Text("GST Percentage (Optional)") },
                 modifier = Modifier.fillMaxWidth(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                 singleLine = true,
                 isError = gstError != null,
-                supportingText = { if (gstError != null) Text(gstError!!) }
+                supportingText = { if (gstError != null) Text(gstError) }
             )
-
 
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -196,25 +227,29 @@ fun ProductEntryScreen(
                 Text("Wholesale Only")
             }
 
-            Spacer(modifier = Modifier.weight(1f))
-
             Button(
                 onClick = {
+                    val price = parsedPrice ?: return@Button
+                    val stock = parsedStock ?: return@Button
+                    if (gstError != null || reorderThresholdError != null) return@Button
                     viewModel.saveProduct(
                         id = productId ?: 0L,
                         name = name,
                         brand = brand,
                         category = category,
                         unitType = unitType,
-                        pricePerUnit = pricePerUnitStr.toDoubleOrNull() ?: 0.0,
-                        availableStock = availableStockStr.toDoubleOrNull() ?: 0.0,
+                        pricePerUnit = price,
+                        availableStock = stock,
                         batchNumber = batchNumber,
                         isWholesaleOnly = isWholesaleOnly,
-                        gstPercentage = gstPercentageStr.takeIf { it.isNotBlank() }?.toDoubleOrNull() ?: 0.0
+                        gstPercentage = parsedGstRate ?: 0.0,
+                        reorderThreshold = parsedReorderThreshold ?: 0.0
                     )
                 },
                 modifier = Modifier.fillMaxWidth(),
-                enabled = saveState !is SaveProductState.Loading && gstError == null
+                enabled = saveState !is SaveProductState.Loading &&
+                    priceError == null && stockError == null &&
+                    gstError == null && reorderThresholdError == null
             ) {
                 if (saveState is SaveProductState.Loading) {
                     CircularProgressIndicator(modifier = Modifier.size(24.dp))

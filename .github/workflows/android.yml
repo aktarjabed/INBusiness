@@ -25,13 +25,101 @@ jobs:
       run: chmod +x gradlew
 
     - name: Build with Gradle
-      run: ./gradlew assembleDebug
+      run: ./gradlew assembleDebug --stacktrace --console=plain 2>&1 | tee gradle-build.log
+
+    - name: Report Gradle failure details
+      if: failure()
+      shell: bash
+      run: |
+        if [[ -f gradle-build.log ]]; then
+          tail -n 40 gradle-build.log
+          summary=$(tail -n 30 gradle-build.log | sed -e 's/%/%25/g' -e 's/\r/%0D/g' | paste -sd ' ' -)
+          echo "::error title=Gradle build diagnostics::$summary"
+        fi
+
+    - name: Preserve checked-in Room v19 schema
+      shell: bash
+      run: |
+        schema_path=app/schemas/com.aktarjabed.inbusiness.data.database.AppDatabase/19.json
+        cp "$schema_path" "$RUNNER_TEMP/room-v19-expected.json"
+        rm "$schema_path"
+
+    - name: Generate Room v19 schema
+      id: generate_room_schema
+      continue-on-error: true
+      shell: bash
+      run: |
+        set -o pipefail
+        ./gradlew clean :app:kaptDebugKotlin --no-build-cache --stacktrace --console=plain 2>&1 | tee room-schema.log
+
+    - name: Report Room schema generation failure
+      if: steps.generate_room_schema.outcome == 'failure'
+      shell: bash
+      run: |
+        details=$(grep -A 18 'An issue was found when checking AAR metadata:' room-schema.log | head -n 19 || true)
+        if [[ -z "$details" ]]; then
+          details=$(grep -E '(^FAILURE:|^\* What went wrong:|^Execution failed|^> |^Caused by:|^e: |^error:)' room-schema.log | tail -n 25 || true)
+        fi
+        if [[ -z "$details" ]]; then
+          details=$(tail -n 20 room-schema.log)
+        fi
+        summary=$(printf '%s\n' "$details" | sed -e 's/%/%25/g' -e 's/\r/%0D/g' | paste -sd ' ' -)
+        echo "::error title=Room schema generation diagnostics::$summary"
+
+    - name: Upload Room schema generation diagnostics
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: room-v19-schema
+        path: |
+          room-schema.log
+          app/schemas/com.aktarjabed.inbusiness.data.database.AppDatabase/19.json
+        if-no-files-found: warn
 
     - name: Run Unit Tests
-      run: ./gradlew testDebugUnitTest
+      run: ./gradlew testDebugUnitTest --stacktrace --console=plain 2>&1 | tee unit-test.log
+
+    - name: Report unit test failure details
+      if: failure()
+      shell: bash
+      run: |
+        if [[ -f unit-test.log ]]; then
+          tail -n 40 unit-test.log
+          summary=$(tail -n 30 unit-test.log | sed -e 's/%/%25/g' -e 's/\r/%0D/g' | paste -sd ' ' -)
+          echo "::error title=Unit test diagnostics::$summary"
+        fi
 
     - name: Run Android Lint
-      run: ./gradlew lintDebug
+      run: ./gradlew lintDebug --stacktrace --console=plain 2>&1 | tee lint.log
+
+    - name: Report lint failure details
+      if: failure()
+      shell: bash
+      run: |
+        if [[ -f lint.log ]]; then
+          tail -n 40 lint.log
+          summary=$(tail -n 30 lint.log | sed -e 's/%/%25/g' -e 's/\r/%0D/g' | paste -sd ' ' -)
+          echo "::error title=Android lint diagnostics::$summary"
+        fi
+
+    - name: Verify Room v19 schema was generated
+      if: always()
+      shell: bash
+      run: |
+        schema_path=app/schemas/com.aktarjabed.inbusiness.data.database.AppDatabase/19.json
+        if [[ "${{ steps.generate_room_schema.outcome }}" != "success" ]]; then
+          echo "::error file=.github/workflows/android.yml::Room Kapt schema export task failed."
+          exit 1
+        fi
+        if [[ ! -s "$schema_path" ]]; then
+          echo "::error file=.github/workflows/android.yml::Room v19 schema is missing after the Kapt export."
+          exit 1
+        fi
+        if ! cmp -s "$schema_path" "$RUNNER_TEMP/room-v19-expected.json"; then
+          diff -u "$RUNNER_TEMP/room-v19-expected.json" "$schema_path" || true
+          echo "::error file=.github/workflows/android.yml::Generated Room v19 schema differs from the checked-in snapshot."
+          exit 1
+        fi
 
     - name: Upload Unit Test Reports
       if: always()
@@ -74,12 +162,22 @@ jobs:
     - name: Run Instrumented Tests
       uses: reactivecircus/android-emulator-runner@v2
       with:
-        api-level: 30
+        api-level: 36
         arch: x86_64
         target: google_apis
         emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
         disable-animations: true
-        script: ./gradlew connectedDebugAndroidTest
+        script: ./gradlew connectedDebugAndroidTest --stacktrace --console=plain 2>&1 | tee instrumentation.log
+
+    - name: Report instrumented test failure details
+      if: failure()
+      shell: bash
+      run: |
+        if [[ -f instrumentation.log ]]; then
+          tail -n 50 instrumentation.log
+          summary=$(tail -n 35 instrumentation.log | sed -e 's/%/%25/g' -e 's/\r/%0D/g' | paste -sd ' ' -)
+          echo "::error title=Instrumented test diagnostics::$summary"
+        fi
 
     - name: Upload Instrumented Test Reports
       if: always()

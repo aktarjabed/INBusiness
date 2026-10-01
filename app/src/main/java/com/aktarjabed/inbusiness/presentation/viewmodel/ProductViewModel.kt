@@ -90,7 +90,8 @@ class ProductViewModel @Inject constructor(
         availableStock: Double,
         batchNumber: String?,
         isWholesaleOnly: Boolean,
-        gstPercentage: Double
+        gstPercentage: Double,
+        reorderThreshold: Double = 0.0
     ) {
         viewModelScope.launch {
             _saveState.value = SaveProductState.Loading
@@ -105,7 +106,8 @@ class ProductViewModel @Inject constructor(
                     availableStock = availableStock,
                     batchNumber = batchNumber,
                     isWholesaleOnly = isWholesaleOnly,
-                    gstPercentage = gstPercentage
+                    gstPercentage = gstPercentage,
+                    reorderThreshold = reorderThreshold
                 )
                 _saveState.value = SaveProductState.Success
             } catch (e: Exception) {

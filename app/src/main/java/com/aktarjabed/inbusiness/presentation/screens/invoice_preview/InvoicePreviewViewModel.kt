@@ -1,13 +1,13 @@
 package com.aktarjabed.inbusiness.presentation.screens.invoice_preview
 
-import android.content.Context
 import android.util.Log
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.aktarjabed.inbusiness.data.entities.Invoice
 import com.aktarjabed.inbusiness.data.entities.InvoiceItem
-import com.aktarjabed.inbusiness.data.entities.BusinessData
+import com.aktarjabed.inbusiness.data.entities.Payment
+import com.aktarjabed.inbusiness.data.repository.PaymentRepository
 import com.aktarjabed.inbusiness.domain.usecase.GetInvoiceForPreviewUseCase
 import com.aktarjabed.inbusiness.domain.usecase.PreviewResult
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -23,9 +23,17 @@ sealed class InvoicePreviewUiState {
     data class Error(val message: String) : InvoicePreviewUiState()
 }
 
+sealed class RecordPaymentUiState {
+    object Idle : RecordPaymentUiState()
+    object Saving : RecordPaymentUiState()
+    object Saved : RecordPaymentUiState()
+    data class Error(val message: String) : RecordPaymentUiState()
+}
+
 @HiltViewModel
 class InvoicePreviewViewModel @Inject constructor(
     private val getInvoiceForPreviewUseCase: GetInvoiceForPreviewUseCase,
+    private val paymentRepository: PaymentRepository,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
@@ -34,27 +42,62 @@ class InvoicePreviewViewModel @Inject constructor(
     private val _uiState = MutableStateFlow<InvoicePreviewUiState>(InvoicePreviewUiState.Loading)
     val uiState: StateFlow<InvoicePreviewUiState> = _uiState.asStateFlow()
 
+    private val _recordPaymentState = MutableStateFlow<RecordPaymentUiState>(RecordPaymentUiState.Idle)
+    val recordPaymentState: StateFlow<RecordPaymentUiState> = _recordPaymentState.asStateFlow()
+
     init {
-        loadInvoice()
+        viewModelScope.launch { loadInvoice() }
     }
 
-    private fun loadInvoice() {
-        viewModelScope.launch {
-            try {
-                val result = getInvoiceForPreviewUseCase(invoiceId)
-                when(result) {
-                    is PreviewResult.Success -> {
-                        _uiState.value = InvoicePreviewUiState.Success(result.invoice, result.items)
-                    }
-                    is PreviewResult.Error -> {
-                        _uiState.value = InvoicePreviewUiState.Error(result.message)
-                    }
+    private suspend fun loadInvoice() {
+        try {
+            val result = getInvoiceForPreviewUseCase(invoiceId)
+            when (result) {
+                is PreviewResult.Success -> {
+                    _uiState.value = InvoicePreviewUiState.Success(result.invoice, result.items)
                 }
+                is PreviewResult.Error -> {
+                    _uiState.value = InvoicePreviewUiState.Error(result.message)
+                }
+            }
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            Log.e("InvoicePreviewViewModel", "Failed to load invoice", e)
+            _uiState.value = InvoicePreviewUiState.Error(e.message ?: "Unknown error occurred")
+        }
+    }
+
+    fun recordPayment(amount: Double, paymentMode: String) {
+        val currentInvoice = (_uiState.value as? InvoicePreviewUiState.Success)?.invoice
+        if (currentInvoice == null) {
+            _recordPaymentState.value = RecordPaymentUiState.Error("Invoice is not ready")
+            return
+        }
+
+        viewModelScope.launch {
+            _recordPaymentState.value = RecordPaymentUiState.Saving
+            try {
+                paymentRepository.addPayment(
+                    Payment(
+                        businessId = currentInvoice.businessId,
+                        invoiceId = currentInvoice.id,
+                        amount = amount,
+                        paymentMode = paymentMode
+                    )
+                )
+                loadInvoice()
+                _recordPaymentState.value = RecordPaymentUiState.Saved
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
-                Log.e("InvoicePreviewViewModel", "Failed to load invoice", e)
-                _uiState.value = InvoicePreviewUiState.Error(e.message ?: "Unknown error occurred")
+                Log.e("InvoicePreviewViewModel", "Failed to record payment", e)
+                _recordPaymentState.value = RecordPaymentUiState.Error(
+                    e.message ?: "Could not record payment"
+                )
             }
         }
+    }
+
+    fun resetRecordPaymentState() {
+        _recordPaymentState.value = RecordPaymentUiState.Idle
     }
 }

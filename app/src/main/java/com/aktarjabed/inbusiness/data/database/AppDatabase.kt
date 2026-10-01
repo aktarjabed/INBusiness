@@ -11,8 +11,7 @@ import com.aktarjabed.inbusiness.data.converters.Converters
 import com.aktarjabed.inbusiness.data.dao.*
 import com.aktarjabed.inbusiness.data.entities.*
 import com.aktarjabed.inbusiness.security.KeyProvider
-import net.sqlcipher.database.SQLiteDatabase
-import net.sqlcipher.database.SupportFactory
+import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
 
 @Database(
     entities = [
@@ -323,8 +322,8 @@ abstract class AppDatabase : RoomDatabase() {
 
     private fun buildDatabase(context: Context, keyProvider: KeyProvider): AppDatabase {
             val passphrase = keyProvider.getDatabasePassphrase()
-            val passphraseBytes = SQLiteDatabase.getBytes(passphrase.toCharArray())
-            val factory = SupportFactory(passphraseBytes)
+            val passphraseBytes = passphrase.toByteArray(Charsets.UTF_8)
+            val factory = SupportOpenHelperFactory(passphraseBytes)
 
             return Room.databaseBuilder(
                 context.applicationContext,

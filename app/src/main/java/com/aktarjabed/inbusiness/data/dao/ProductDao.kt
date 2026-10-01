@@ -22,7 +22,8 @@ interface ProductDao {
             availableStock = :availableStock,
             batchNumber = :batchNumber,
             isWholesaleOnly = :isWholesaleOnly,
-            gstPercentage = :gstPercentage
+            gstPercentage = :gstPercentage,
+            reorderThreshold = :reorderThreshold
         WHERE id = :id
           AND businessId = :businessId
     """)
@@ -37,7 +38,8 @@ interface ProductDao {
         availableStock: Double,
         batchNumber: String,
         isWholesaleOnly: Boolean,
-        gstPercentage: Double
+        gstPercentage: Double,
+        reorderThreshold: Double
     ): Int
 
     @Query("DELETE FROM products WHERE id = :id AND businessId = :businessId")

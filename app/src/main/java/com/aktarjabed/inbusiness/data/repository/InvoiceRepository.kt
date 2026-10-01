@@ -43,6 +43,7 @@ class InvoiceRepository @Inject constructor(
 
     companion object {
         private const val TAG = "InvoiceRepository"
+        private val VALID_PAYMENT_METHODS = setOf("CASH", "CARD", "UPI", "BANK_TRANSFER")
     }
 
     suspend fun getAllInvoicesOnce(): List<Invoice> {
@@ -81,6 +82,9 @@ class InvoiceRepository @Inject constructor(
         if (items.isEmpty()) {
             return@withContext InvoiceCreationResult.InvalidRequest("Invoice must have at least one item")
         }
+        if (amountPaid > 0.0 && paymentMethod !in VALID_PAYMENT_METHODS) {
+            return@withContext InvoiceCreationResult.InvalidRequest("Select a valid payment method for the initial payment")
+        }
 
         val businessId = businessContext.activeBusinessId.first()
         val userId = businessContext.currentUserId.first()
@@ -103,6 +107,7 @@ class InvoiceRepository @Inject constructor(
                     throw TransactionAbortException(InvoiceCreationResult.InvalidRequest(e.message ?: "Invalid calculation"))
                 }
 
+                val effectivePaymentMethod = if (calcResult.amountPaid > 0.0) paymentMethod else "NONE"
                 requestFingerprint = com.aktarjabed.inbusiness.utils.RequestFingerprint.generate(
                     businessId = businessId,
                     sellerName = sellerName,
@@ -117,7 +122,7 @@ class InvoiceRepository @Inject constructor(
                     taxAmount = calcResult.taxAmount,
                     items = calcResult.processedItems,
                     amountPaid = calcResult.amountPaid,
-                    paymentMethod = paymentMethod
+                    paymentMethod = effectivePaymentMethod
                 )
 
                 // 1. Idempotency Check (Fast path)
@@ -211,7 +216,7 @@ class InvoiceRepository @Inject constructor(
                     supplyType = supplyType.name,
                     amountPaid = calcResult.amountPaid,
                     balanceDue = calcResult.balanceDue,
-                    paymentMethod = paymentMethod,
+                    paymentMethod = effectivePaymentMethod,
                     createdAt = Instant.now(),
                     updatedAt = Instant.now()
                 )
@@ -233,7 +238,7 @@ class InvoiceRepository @Inject constructor(
                             businessId = businessId,
                             invoiceId = invoiceId,
                             amount = calcResult.amountPaid,
-                            paymentMode = paymentMethod,
+                            paymentMode = effectivePaymentMethod,
                             paymentDate = System.currentTimeMillis()
                         )
                     )
@@ -275,7 +280,7 @@ class InvoiceRepository @Inject constructor(
     suspend fun cancelInvoice(invoiceId: String): com.aktarjabed.inbusiness.domain.invoice.InvoiceCreationResult = withContext(Dispatchers.IO) {
         val businessId = businessContext.activeBusinessId.first()
         try {
-            database.withTransaction {
+            val invoiceNumber = database.withTransaction {
                 val invoice = invoiceDao.getInvoiceById(invoiceId, businessId)
                     ?: throw TransactionAbortException(InvoiceCreationResult.InvalidRequest("Invoice not found"))
 
@@ -283,18 +288,23 @@ class InvoiceRepository @Inject constructor(
                     throw TransactionAbortException(InvoiceCreationResult.InvalidRequest("Invoice is already cancelled"))
                 }
 
-                // 1. Mark as cancelled
-                invoiceDao.updateInvoice(invoice.copy(status = "CANCELLED"))
+                val hasSuccessfulPayments = paymentDao.hasSuccessfulPaymentForInvoice(businessId, invoiceId)
+                if (invoice.amountPaid > 0.0 || hasSuccessfulPayments) {
+                    throw TransactionAbortException(
+                        InvoiceCreationResult.InvalidRequest(
+                            "This invoice has recorded payments. Refund/reconcile payments before cancellation."
+                        )
+                    )
+                }
 
-                // 2. Reverse stock
+                invoiceDao.updateInvoice(invoice.copy(status = "CANCELLED", updatedAt = Instant.now()))
+
                 val items = invoiceDao.getInvoiceItems(invoiceId, businessId)
                 for (item in items) {
                     if (item.productId != null) {
                         val product = productDao.getProductById(item.productId, businessId)
                         if (product != null) {
                             productDao.addStock(item.productId, businessId, item.quantity)
-
-                            // 3. Create SALE_REVERSAL movement
                             stockMovementDao.insertMovement(
                                 com.aktarjabed.inbusiness.data.entities.StockMovement(
                                     businessId = businessId,
@@ -311,8 +321,9 @@ class InvoiceRepository @Inject constructor(
                         }
                     }
                 }
+                invoice.invoiceNumber
             }
-            InvoiceCreationResult.Success(invoiceId, invoiceId)
+            InvoiceCreationResult.Success(invoiceId, invoiceNumber)
         } catch (e: TransactionAbortException) {
             e.result
         } catch (e: Exception) {

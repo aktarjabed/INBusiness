@@ -7,12 +7,11 @@ import android.graphics.Paint
 import android.graphics.Typeface
 import android.graphics.pdf.PdfDocument
 
-import com.aktarjabed.inbusiness.data.entities.BusinessData
 import com.aktarjabed.inbusiness.data.entities.Invoice
 import com.aktarjabed.inbusiness.data.entities.InvoiceItem
+import com.aktarjabed.inbusiness.utils.AppDateUtils
 import java.io.File
 import java.io.FileOutputStream
-import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
@@ -53,23 +52,51 @@ class PdfGenerator(private val context: Context) {
         items: List<InvoiceItem>
     ): File? {
         val pdfDocument = PdfDocument()
-        var pageNumber = 1
-        var yPosition = MARGIN
+        var outputFile: File? = null
+        try {
+            var pageNumber = 1
+            var yPosition = MARGIN
 
-        var pageInfo = PdfDocument.PageInfo.Builder(PAGE_WIDTH, PAGE_HEIGHT, pageNumber).create()
-        var page = pdfDocument.startPage(pageInfo)
-        var canvas = page.canvas
+            var pageInfo = PdfDocument.PageInfo.Builder(PAGE_WIDTH, PAGE_HEIGHT, pageNumber).create()
+            var page = pdfDocument.startPage(pageInfo)
+            var canvas = page.canvas
 
-        // Header
-        yPosition = drawHeader(canvas, invoice, yPosition)
+            fun startNewPage(includeTableHeader: Boolean): Float {
+                pdfDocument.finishPage(page)
+                pageNumber++
+                pageInfo = PdfDocument.PageInfo.Builder(PAGE_WIDTH, PAGE_HEIGHT, pageNumber).create()
+                page = pdfDocument.startPage(pageInfo)
+                canvas = page.canvas
+                var nextY = drawHeader(canvas, invoice, MARGIN)
+                if (includeTableHeader) {
+                    nextY = drawTableHeader(canvas, nextY)
+                }
+                return nextY
+            }
 
-        // Items Table Header
-        yPosition = drawTableHeader(canvas, yPosition)
+            yPosition = drawHeader(canvas, invoice, yPosition)
+            yPosition = drawTableHeader(canvas, yPosition)
 
-        // Items
-        for (item in items) {
-            // Check if we need a new page
-            if (yPosition > PAGE_HEIGHT - MARGIN - 100) {
+            // Paginate even when a single item description wraps across multiple lines/pages.
+            for (item in items) {
+                val descriptionLines = wrapDescription(item.description, 190f)
+                var firstLine = true
+                for (line in descriptionLines) {
+                    if (yPosition + 20f > PAGE_HEIGHT - MARGIN - 100f) {
+                        yPosition = startNewPage(includeTableHeader = true)
+                    }
+                    drawItemLine(canvas, item, line, yPosition, firstLine)
+                    yPosition += 20f
+                    firstLine = false
+                }
+            }
+
+            // Draw line after items
+            canvas.drawLine(MARGIN, yPosition, PAGE_WIDTH - MARGIN, yPosition, boldPaint)
+            yPosition += 20f
+
+            // Check if totals fit (increased margin to accommodate new sections)
+            if (yPosition > PAGE_HEIGHT - MARGIN - 250) {
                 pdfDocument.finishPage(page)
                 pageNumber++
                 pageInfo = PdfDocument.PageInfo.Builder(PAGE_WIDTH, PAGE_HEIGHT, pageNumber).create()
@@ -77,60 +104,40 @@ class PdfGenerator(private val context: Context) {
                 canvas = page.canvas
                 yPosition = MARGIN
 
-                // Redraw seller and buyer header on new page
+                // Redraw header for context on the new page
                 yPosition = drawHeader(canvas, invoice, yPosition)
-
-                // Redraw table header on new page
-                yPosition = drawTableHeader(canvas, yPosition)
             }
 
-            yPosition = drawItemRow(canvas, item, yPosition)
-        }
+            // Totals
+            yPosition = drawTotals(canvas, invoice, yPosition)
 
-        // Draw line after items
-        canvas.drawLine(MARGIN, yPosition, PAGE_WIDTH - MARGIN, yPosition, boldPaint)
-        yPosition += 20f
+            // Amount in words
+            yPosition = drawAmountInWords(canvas, invoice.totalAmount, yPosition)
 
-        // Check if totals fit (increased margin to accommodate new sections)
-        if (yPosition > PAGE_HEIGHT - MARGIN - 250) {
+            // Payment Details
+            yPosition = drawPaymentDetails(canvas, invoice, yPosition)
+
+            // Terms
+            drawTerms(canvas, yPosition)
+
+            // Footer
+            drawFooter(canvas)
+
             pdfDocument.finishPage(page)
-            pageNumber++
-            pageInfo = PdfDocument.PageInfo.Builder(PAGE_WIDTH, PAGE_HEIGHT, pageNumber).create()
-            page = pdfDocument.startPage(pageInfo)
-            canvas = page.canvas
-            yPosition = MARGIN
 
-            // Redraw header for context on the new page
-            yPosition = drawHeader(canvas, invoice, yPosition)
-        }
+            // Save to FileProvider cache directory
+            val cachePath = File(context.cacheDir, "invoices")
+            cachePath.mkdirs()
+            // Ensure unique filename to prevent overwrite
+            val file = File(cachePath, "Invoice_${invoice.invoiceNumber}_${System.currentTimeMillis()}.pdf")
 
-        // Totals
-        yPosition = drawTotals(canvas, invoice, yPosition)
-
-        // Amount in words
-        yPosition = drawAmountInWords(canvas, invoice.totalAmount, yPosition)
-
-        // Payment Details
-        yPosition = drawPaymentDetails(canvas, invoice, yPosition)
-
-        // Terms
-        drawTerms(canvas, yPosition)
-
-        // Footer
-        drawFooter(canvas)
-
-        pdfDocument.finishPage(page)
-
-        // Save to FileProvider cache directory
-        val cachePath = File(context.cacheDir, "invoices")
-        cachePath.mkdirs()
-        // Ensure unique filename to prevent overwrite
-        val file = File(cachePath, "Invoice_${invoice.invoiceNumber}_${System.currentTimeMillis()}.pdf")
-
-        try {
-            pdfDocument.writeTo(FileOutputStream(file))
+            outputFile = file
+            FileOutputStream(file).use { outputStream ->
+                pdfDocument.writeTo(outputStream)
+            }
             return file
         } catch (e: Exception) {
+            outputFile?.delete()
             e.printStackTrace()
             return null
         } finally {
@@ -190,7 +197,7 @@ class PdfGenerator(private val context: Context) {
         y += 30f
 
         // Dynamic Invoice Info (Left/Right)
-        val dateFormatter = DateTimeFormatter.ofPattern("dd-MMM-yyyy").withZone(ZoneId.systemDefault())
+        val dateFormatter = DateTimeFormatter.ofPattern("dd-MMM-yyyy").withZone(AppDateUtils.businessZoneId)
         val rightMargin = PAGE_WIDTH - MARGIN
 
         val invNoText = "INVOICE NO: ${invoice.invoiceNumber}"
@@ -238,51 +245,53 @@ class PdfGenerator(private val context: Context) {
         return y + 20f
     }
 
-    private fun drawItemRow(canvas: Canvas, item: InvoiceItem, startY: Float): Float {
-        var y = startY
-        val colDescWidth = 190f
+    private fun wrapDescription(text: String, maxWidth: Float): List<String> {
+        val words = text.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
+        if (words.isEmpty()) return listOf("")
 
-        // Text wrapping for description
-        val words = item.description.split(" ")
-        var currentLine = ""
         val lines = mutableListOf<String>()
-
+        var currentLine = ""
         for (word in words) {
-            val testLine = if (currentLine.isEmpty()) word else "$currentLine $word"
-            if (textPaint.measureText(testLine) < colDescWidth) {
-                currentLine = testLine
+            var remaining = word
+            while (textPaint.measureText(remaining) > maxWidth) {
+                if (currentLine.isNotEmpty()) {
+                    lines.add(currentLine)
+                    currentLine = ""
+                }
+                var splitAt = 1
+                while (splitAt < remaining.length &&
+                    textPaint.measureText(remaining.substring(0, splitAt + 1)) <= maxWidth
+                ) {
+                    splitAt++
+                }
+                lines.add(remaining.substring(0, splitAt))
+                remaining = remaining.substring(splitAt)
+            }
+
+            val candidate = if (currentLine.isEmpty()) remaining else "$currentLine $remaining"
+            if (textPaint.measureText(candidate) <= maxWidth) {
+                currentLine = candidate
             } else {
-                lines.add(currentLine)
-                currentLine = word
+                if (currentLine.isNotEmpty()) lines.add(currentLine)
+                currentLine = remaining
             }
         }
-        if (currentLine.isNotEmpty()) {
-            lines.add(currentLine)
-        }
+        if (currentLine.isNotEmpty()) lines.add(currentLine)
+        return lines.ifEmpty { listOf("") }
+    }
 
-        // Draw first line of description and the other columns
-        if (lines.isNotEmpty()) {
-            canvas.drawText("| ${lines[0]}", MARGIN + 5f, y, textPaint)
-        }
+    private fun drawItemLine(canvas: Canvas, item: InvoiceItem, description: String, y: Float, firstLine: Boolean) {
+        canvas.drawText("| $description", MARGIN + 5f, y, textPaint)
+        if (!firstLine) return
 
         canvas.drawText("| ${item.quantity}", 250f, y, textPaint)
-        val unitStr = if(item.unitType.isNotBlank()) item.unitType else "-"
+        val unitStr = if (item.unitType.isNotBlank()) item.unitType else "-"
         canvas.drawText("| $unitStr", 290f, y, textPaint)
         canvas.drawText("| ${String.format(Locale.US, "%.2f", item.pricePerUnit)}", 340f, y, textPaint)
         canvas.drawText("| ${item.gstPercentage}", 410f, y, textPaint)
 
         val totalStr = "| ${String.format(Locale.US, "%.2f", item.totalAmount)}"
         canvas.drawText(totalStr, PAGE_WIDTH - MARGIN - textPaint.measureText(totalStr) - 5f, y, textPaint)
-
-        y += 20f
-
-        // Draw remaining lines of description
-        for (i in 1 until lines.size) {
-            canvas.drawText("| ${lines[i]}", MARGIN + 5f, y, textPaint)
-            y += 20f
-        }
-
-        return y
     }
 
     private fun drawTotals(canvas: Canvas, invoice: Invoice, startY: Float): Float {

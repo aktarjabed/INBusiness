@@ -1,32 +1,31 @@
 package com.aktarjabed.inbusiness.presentation.screens.invoice_preview
 
-import android.content.Context
+import android.content.Intent
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.core.content.FileProvider
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.aktarjabed.inbusiness.data.entities.Invoice
 import com.aktarjabed.inbusiness.data.entities.InvoiceItem
-import android.content.Intent
-import androidx.core.content.FileProvider
-import com.aktarjabed.inbusiness.utils.pdf.PdfGenerator
-import kotlinx.coroutines.launch
 import com.aktarjabed.inbusiness.presentation.components.LoadingScreen
-import java.time.ZoneId
+import com.aktarjabed.inbusiness.utils.AppDateUtils
+import com.aktarjabed.inbusiness.utils.pdf.PdfGenerator
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
@@ -37,7 +36,28 @@ fun InvoicePreviewScreen(
     viewModel: InvoicePreviewViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val recordPaymentState by viewModel.recordPaymentState.collectAsState()
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    var showPaymentDialog by remember { mutableStateOf(false) }
+    var paymentAmountText by remember { mutableStateOf("") }
+    var paymentMode by remember { mutableStateOf("CASH") }
+    var paymentModeMenuExpanded by remember { mutableStateOf(false) }
+    var isExporting by remember { mutableStateOf(false) }
+
+    LaunchedEffect(recordPaymentState) {
+        if (recordPaymentState is RecordPaymentUiState.Saved) {
+            showPaymentDialog = false
+            paymentAmountText = ""
+            snackbarHostState.showSnackbar("Payment recorded.")
+            viewModel.resetRecordPaymentState()
+        }
+    }
+
+    val parsedPaymentAmount = paymentAmountText.toDoubleOrNull()
+    val paymentInputValid = parsedPaymentAmount != null && parsedPaymentAmount.isFinite() && parsedPaymentAmount > 0.0
 
     Scaffold(
         topBar = {
@@ -45,27 +65,42 @@ fun InvoicePreviewScreen(
                 title = { Text("Invoice Preview") },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 }
             )
         },
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         bottomBar = {
-            if (uiState is InvoicePreviewUiState.Success) {
-                val state = uiState as InvoicePreviewUiState.Success
+            val success = uiState as? InvoicePreviewUiState.Success
+            if (success != null && success.invoice.status != "CANCELLED") {
                 BottomAppBar {
                     Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                        horizontalArrangement = Arrangement.SpaceEvenly
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-
-                            val coroutineScope = rememberCoroutineScope()
-                            Button(
+                        if (success.invoice.status == "COMPLETED" && success.invoice.balanceDue > 0.0) {
+                            OutlinedButton(
                                 onClick = {
-                                    coroutineScope.launch {
-                                        val generator = PdfGenerator(context)
-                                        val file = generator.generateInvoicePdf(state.invoice, state.items)
-                                        if (file != null) {
+                                    paymentAmountText = String.format(Locale.US, "%.2f", success.invoice.balanceDue)
+                                    showPaymentDialog = true
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Record Payment")
+                            }
+                        }
+                        Button(
+                            onClick = {
+                                coroutineScope.launch {
+                                    isExporting = true
+                                    try {
+                                        val file = withContext(Dispatchers.IO) {
+                                            PdfGenerator(context).generateInvoicePdf(success.invoice, success.items)
+                                        }
+                                        if (file == null) {
+                                            snackbarHostState.showSnackbar("Could not create the invoice PDF.")
+                                        } else {
                                             val uri = FileProvider.getUriForFile(
                                                 context,
                                                 "${context.packageName}.fileprovider",
@@ -78,13 +113,23 @@ fun InvoicePreviewScreen(
                                             }
                                             context.startActivity(Intent.createChooser(intent, "Share Invoice"))
                                         }
+                                    } catch (e: Exception) {
+                                        if (e is kotlinx.coroutines.CancellationException) throw e
+                                        snackbarHostState.showSnackbar("Could not share the invoice: ${e.message ?: "unknown error"}")
+                                    } finally {
+                                        isExporting = false
                                     }
-                                },
-
-                            modifier = Modifier.weight(1f).padding(end = 8.dp)
+                                }
+                            },
+                            enabled = !isExporting,
+                            modifier = Modifier.weight(1f)
                         ) {
-                            Icon(Icons.Default.Share, contentDescription = "Share", modifier = Modifier.padding(end = 8.dp))
-                            Text("Share PDF")
+                            if (isExporting) {
+                                CircularProgressIndicator(modifier = Modifier.size(20.dp))
+                            } else {
+                                Icon(Icons.Default.Share, contentDescription = "Share", modifier = Modifier.padding(end = 8.dp))
+                                Text("Share PDF")
+                            }
                         }
                     }
                 }
@@ -115,11 +160,92 @@ fun InvoicePreviewScreen(
             }
         }
     }
+
+    if (showPaymentDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                if (recordPaymentState !is RecordPaymentUiState.Saving) {
+                    showPaymentDialog = false
+                    viewModel.resetRecordPaymentState()
+                }
+            },
+            title = { Text("Record a payment") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedTextField(
+                        value = paymentAmountText,
+                        onValueChange = { paymentAmountText = it },
+                        label = { Text("Amount received (₹)") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        singleLine = true,
+                        isError = paymentAmountText.isNotBlank() && !paymentInputValid
+                    )
+                    ExposedDropdownMenuBox(
+                        expanded = paymentModeMenuExpanded,
+                        onExpandedChange = { paymentModeMenuExpanded = !paymentModeMenuExpanded }
+                    ) {
+                        OutlinedTextField(
+                            value = paymentMode,
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("Payment method") },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = paymentModeMenuExpanded) },
+                            modifier = Modifier.menuAnchor().fillMaxWidth()
+                        )
+                        ExposedDropdownMenu(
+                            expanded = paymentModeMenuExpanded,
+                            onDismissRequest = { paymentModeMenuExpanded = false }
+                        ) {
+                            listOf("CASH", "CARD", "UPI", "BANK_TRANSFER").forEach { method ->
+                                DropdownMenuItem(
+                                    text = { Text(method) },
+                                    onClick = {
+                                        paymentMode = method
+                                        paymentModeMenuExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    if (recordPaymentState is RecordPaymentUiState.Error) {
+                        Text(
+                            (recordPaymentState as RecordPaymentUiState.Error).message,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                    if (recordPaymentState is RecordPaymentUiState.Saving) {
+                        Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator()
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = paymentInputValid && recordPaymentState !is RecordPaymentUiState.Saving,
+                    onClick = { parsedPaymentAmount?.let { viewModel.recordPayment(it, paymentMode) } }
+                ) {
+                    Text("Save payment")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    enabled = recordPaymentState !is RecordPaymentUiState.Saving,
+                    onClick = {
+                        showPaymentDialog = false
+                        viewModel.resetRecordPaymentState()
+                    }
+                ) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
 }
 
 @Composable
 fun InvoiceDetails(invoice: Invoice, items: List<InvoiceItem>) {
-    val dateFormatter = DateTimeFormatter.ofPattern("dd MMM yyyy, HH:mm").withZone(ZoneId.systemDefault())
+    val dateFormatter = DateTimeFormatter.ofPattern("dd MMM yyyy, HH:mm").withZone(AppDateUtils.businessZoneId)
 
     Column(
         modifier = Modifier
@@ -128,7 +254,6 @@ fun InvoiceDetails(invoice: Invoice, items: List<InvoiceItem>) {
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // Header
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text(
@@ -144,10 +269,16 @@ fun InvoiceDetails(invoice: Invoice, items: List<InvoiceItem>) {
                     text = "Supply Type: ${invoice.supplyType.replace("_", " ")}",
                     style = MaterialTheme.typography.bodyMedium
                 )
+                if (invoice.status == "CANCELLED") {
+                    Text(
+                        text = "CANCELLED — this invoice is not valid for payment.",
+                        color = MaterialTheme.colorScheme.error,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
         }
 
-        // Billed To
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text("Billed To", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
@@ -162,7 +293,6 @@ fun InvoiceDetails(invoice: Invoice, items: List<InvoiceItem>) {
             }
         }
 
-        // Items Table
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text("Line Items", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
@@ -184,15 +314,12 @@ fun InvoiceDetails(invoice: Invoice, items: List<InvoiceItem>) {
             }
         }
 
-        // Totals Summary
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text("Summary", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.height(8.dp))
 
-                val subtotal = invoice.subtotal
-
-                SummaryRow("Subtotal:", subtotal)
+                SummaryRow("Subtotal:", invoice.subtotal)
                 if (invoice.totalCgst > 0) SummaryRow("CGST:", invoice.totalCgst)
                 if (invoice.totalSgst > 0) SummaryRow("SGST:", invoice.totalSgst)
                 if (invoice.totalIgst > 0) SummaryRow("IGST:", invoice.totalIgst)
@@ -206,6 +333,8 @@ fun InvoiceDetails(invoice: Invoice, items: List<InvoiceItem>) {
                     Text("Grand Total:", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     Text(String.format(Locale.US, "₹%.2f", invoice.totalAmount), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                 }
+                SummaryRow("Total paid:", invoice.amountPaid)
+                SummaryRow("Balance due:", invoice.balanceDue)
             }
         }
     }

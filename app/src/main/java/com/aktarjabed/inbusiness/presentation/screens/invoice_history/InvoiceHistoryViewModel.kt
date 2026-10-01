@@ -6,6 +6,11 @@ import com.aktarjabed.inbusiness.data.entities.Invoice
 import com.aktarjabed.inbusiness.data.repository.InvoiceHistoryRepository
 import com.aktarjabed.inbusiness.utils.AppDateUtils
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -20,8 +25,8 @@ data class InvoiceHistoryUiState(
     val error: String? = null,
     val searchQuery: String = "",
     val startDate: LocalDate? = null,
-    val endDate: LocalDate? = null, // Inclusive UI perspective
-    val status: String? = "COMPLETED", // Default
+    val endDate: LocalDate? = null,
+    val status: String? = "COMPLETED",
     val paymentStatus: String? = null,
     val documentType: String? = null,
     val isEndOfList: Boolean = false
@@ -37,6 +42,8 @@ class InvoiceHistoryViewModel @Inject constructor(
 
     private var currentOffset = 0
     private val limit = 50
+    private var activeLoad: Job? = null
+    private var pendingSearch: Job? = null
 
     init {
         loadInvoices(reset = true)
@@ -44,30 +51,43 @@ class InvoiceHistoryViewModel @Inject constructor(
 
     fun onSearchQueryChanged(query: String) {
         _uiState.update { it.copy(searchQuery = query) }
-        loadInvoices(reset = true)
+        activeLoad?.cancel()
+        _uiState.update { it.copy(isLoading = false) }
+        pendingSearch?.cancel()
+        pendingSearch = viewModelScope.launch {
+            delay(300)
+            loadInvoices(reset = true)
+        }
     }
 
     fun onDateRangeSelected(start: LocalDate?, end: LocalDate?) {
         _uiState.update { it.copy(startDate = start, endDate = end) }
-        loadInvoices(reset = true)
+        reloadForFilterChange()
     }
 
     fun onStatusChanged(status: String?) {
         _uiState.update { it.copy(status = status) }
-        loadInvoices(reset = true)
+        reloadForFilterChange()
     }
 
     fun onPaymentStatusChanged(paymentStatus: String?) {
         _uiState.update { it.copy(paymentStatus = paymentStatus) }
-        loadInvoices(reset = true)
+        reloadForFilterChange()
     }
 
     fun onDocumentTypeChanged(documentType: String?) {
         _uiState.update { it.copy(documentType = documentType) }
+        reloadForFilterChange()
+    }
+
+    private fun reloadForFilterChange() {
+        pendingSearch?.cancel()
+        pendingSearch = null
         loadInvoices(reset = true)
     }
 
     fun loadMore() {
+        if (pendingSearch?.isActive == true) return
         if (!_uiState.value.isLoading && !_uiState.value.isEndOfList) {
             loadInvoices(reset = false)
         }
@@ -75,29 +95,33 @@ class InvoiceHistoryViewModel @Inject constructor(
 
     fun loadInvoices(reset: Boolean = false) {
         if (reset) {
+            activeLoad?.cancel()
             currentOffset = 0
             _uiState.update { it.copy(invoices = emptyList(), isEndOfList = false) }
+        } else if (activeLoad?.isActive == true) {
+            return
         }
 
-        viewModelScope.launch {
+        val requestOffset = currentOffset
+        val requestState = _uiState.value
+        activeLoad = viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
             try {
-                val state = _uiState.value
-                val startMillis = state.startDate?.let { AppDateUtils.getStartOfDay(it) }
-                // User's endDate is inclusive. E.g. Sep 16 -> We want < Sep 17 00:00.
-                val endMillis = state.endDate?.let { AppDateUtils.getStartOfNextDay(it) }
-
+                val startMillis = requestState.startDate?.let { AppDateUtils.getStartOfDay(it) }
+                // The UI end date is inclusive, so query until the next business-local midnight.
+                val endMillis = requestState.endDate?.let { AppDateUtils.getStartOfNextDay(it) }
                 val newInvoices = repository.getInvoices(
-                    search = state.searchQuery,
+                    search = requestState.searchQuery,
                     startDate = startMillis,
                     endDate = endMillis,
-                    status = state.status,
-                    paymentStatus = state.paymentStatus,
-                    documentType = state.documentType,
+                    status = requestState.status,
+                    paymentStatus = requestState.paymentStatus,
+                    documentType = requestState.documentType,
                     limit = limit,
-                    offset = currentOffset
+                    offset = requestOffset
                 )
 
+                currentCoroutineContext().ensureActive()
                 _uiState.update {
                     it.copy(
                         invoices = if (reset) newInvoices else it.invoices + newInvoices,
@@ -105,8 +129,9 @@ class InvoiceHistoryViewModel @Inject constructor(
                         isLoading = false
                     )
                 }
-                currentOffset += newInvoices.size
-
+                currentOffset = requestOffset + newInvoices.size
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 _uiState.update { it.copy(error = e.message, isLoading = false) }
             }

@@ -29,10 +29,11 @@
 -keepclassmembers enum * {
     public static **[] values();
     public static ** valueOf(java.lang.String);
-}-dontwarn com.google.errorprone.annotations.**
+}
+-dontwarn com.google.errorprone.annotations.**
+
 # SQLCipher rules
--keep class net.sqlcipher.** { *; }
--keep class net.sqlcipher.database.** { *; }
+-keep class net.zetetic.database.** { *; }
 -keep class org.sqlite.database.** { *; }
 
 # WorkManager
