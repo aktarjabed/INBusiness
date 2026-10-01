@@ -67,24 +67,22 @@ class DatabaseMigrationTest {
     @Throws(IOException::class)
     fun migrate18To19_preservesRowsAndNormalizesBusinessIds() {
         val dbName = "migration-test-18-19"
-        val db = helper.createDatabase(dbName, 18)
+        var db = helper.createDatabase(dbName, 18)
         insertBusinessData(db)
         insertInvoice(db, "inv-18", "1", "INV-0018")
         insertProduct(db, "1", productId = 1L)
         db.execSQL("INSERT INTO customers (id, businessId, name, address, gstin, phone, isActive) VALUES (1, 1, 'Cust18', '', '', '', 1)")
         db.execSQL("INSERT INTO payments (id, businessId, invoiceId, amount, paymentMode, paymentDate, referenceNumber, status) VALUES (1, 1, 'inv-18', 25.0, 'UPI', 100, 'ref-18', 'SUCCESS')")
         db.execSQL("INSERT INTO stock_movements (id, businessId, productId, movementType, quantity, stockBefore, stockAfter, referenceType, referenceId, reason, createdAt) VALUES (1, 1, 1, 'OPENING_STOCK', 100.0, 0.0, 100.0, 'PRODUCT', '1', '', 100)")
+        db.close()
 
-        // Mirror Room's transactional migration, with foreign keys disabled before the transaction.
-        db.execSQL("PRAGMA foreign_keys=OFF")
-        db.beginTransaction()
-        try {
-            AppDatabase.MIGRATION_18_19.migrate(db)
-            db.setTransactionSuccessful()
-        } finally {
-            db.endTransaction()
-        }
-        db.execSQL("PRAGMA foreign_keys=ON")
+        // Let Room run the migration and validate the complete v19 schema snapshot.
+        db = helper.runMigrationsAndValidate(
+            dbName,
+            19,
+            true,
+            AppDatabase.MIGRATION_18_19
+        )
 
         assertTextBusinessId(db, "customers")
         assertTextBusinessId(db, "payments")

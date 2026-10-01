@@ -37,6 +37,13 @@ jobs:
           echo "::error title=Gradle build diagnostics::$summary"
         fi
 
+    - name: Upload generated Room v19 schema
+      uses: actions/upload-artifact@v4
+      with:
+        name: room-v19-schema
+        path: app/schemas/com.aktarjabed.inbusiness.data.database.AppDatabase/19.json
+        if-no-files-found: warn
+
     - name: Run Unit Tests
       run: ./gradlew testDebugUnitTest --stacktrace --console=plain 2>&1 | tee unit-test.log
 
