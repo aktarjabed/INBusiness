@@ -116,7 +116,13 @@ jobs:
         schema_path=app/schemas/com.aktarjabed.inbusiness.data.database.AppDatabase/19.json
         if [[ -s "$schema_path" ]]; then
           payload=$(gzip -n -c "$schema_path" | base64 -w 0)
-          echo "::warning title=Temporary Room v19 schema payload::ROOM_V19_SCHEMA_GZ_B64=$payload"
+          chunk_size=3000
+          chunk_count=$(( (${#payload} + chunk_size - 1) / chunk_size ))
+          for ((index = 0; index < chunk_count; index++)); do
+            chunk=${payload:$((index * chunk_size)):chunk_size}
+            part=$((index + 1))
+            echo "::warning title=Temporary Room v19 schema payload ${part}/${chunk_count}::ROOM_V19_SCHEMA_GZ_B64_PART_${part}_OF_${chunk_count}=$chunk"
+          done
         fi
 
     - name: Upload Unit Test Reports
