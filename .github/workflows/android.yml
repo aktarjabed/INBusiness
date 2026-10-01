@@ -320,12 +320,20 @@ jobs:
 
         files = sorted(glob.glob('app/build/outputs/androidTest-results/**/TEST-*.xml', recursive=True))
         total = failures = errors = skipped = 0
+        failing = []
         for path in files:
             root = ET.parse(path).getroot()
             total += int(root.get('tests', 0) or 0)
             failures += int(root.get('failures', 0) or 0)
             errors += int(root.get('errors', 0) or 0)
             skipped += int(root.get('skipped', 0) or 0)
+            for case in root.iter('testcase'):
+                for bad in list(case.iter('failure')) + list(case.iter('error')):
+                    message = ' '.join((bad.get('message') or bad.text or '').split())
+                    failing.append(f"{case.get('classname')}.{case.get('name')}: {message[:200]}")
+
+        for entry in failing[:25]:
+            print(f"::error title=Failing instrumented test::{entry}")
         print(f"Instrumented tests: {total} cases in {len(files)} classes "
               f"({failures} failures, {errors} errors, {skipped} skipped)")
         print(f"::notice title=Instrumented tests executed::{total} cases in {len(files)} classes, "
