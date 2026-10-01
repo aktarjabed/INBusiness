@@ -14,14 +14,17 @@ data class InvoiceHistoryFilter(
     val offset: Int = 0
 ) {
     /**
-     * Builds the raw history query.
+     * The parameterised query, as plain data.
      *
-     * The concrete [SimpleSQLiteQuery] type is returned (rather than the interface) so that
-     * tests can assert on both the SQL text and the bind arguments.
+     * Kept separate from [toSQLiteQuery] so the "every user value is a bind argument, never
+     * interpolated" contract is directly assertable in tests without depending on
+     * `SimpleSQLiteQuery` internals.
      */
-    fun toSQLiteQuery(): SimpleSQLiteQuery {
+    data class BuiltQuery(val sql: String, val args: List<Any?>)
+
+    fun buildQuery(): BuiltQuery {
         var queryString = "SELECT * FROM invoices WHERE businessId = ?"
-        val bindArgs = mutableListOf<Any>(businessId)
+        val bindArgs = mutableListOf<Any?>(businessId)
 
         if (!search.isNullOrBlank()) {
             queryString += " AND (invoiceNumber LIKE '%' || ? || '%' OR customerName LIKE '%' || ? || '%')"
@@ -62,6 +65,11 @@ data class InvoiceHistoryFilter(
         bindArgs.add(limit)
         bindArgs.add(offset)
 
-        return SimpleSQLiteQuery(queryString, bindArgs.toTypedArray())
+        return BuiltQuery(queryString, bindArgs)
+    }
+
+    fun toSQLiteQuery(): SimpleSQLiteQuery {
+        val built = buildQuery()
+        return SimpleSQLiteQuery(built.sql, built.args.toTypedArray())
     }
 }

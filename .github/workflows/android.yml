@@ -50,7 +50,14 @@ jobs:
       run: |
         if [[ -f gradle-build.log ]]; then
           echo "--- first errors in gradle-build.log ---"
-          grep -n -m 25 -E '^(e: |error:|w: .*error|FAILURE:|> Task .*FAILED|Execution failed for task|\* What went wrong:|Caused by:|Exception)' gradle-build.log || true
+          head_lines=$(grep -n -m 25 -E '^(e: |error:|w: .*error|FAILURE:|> Task .*FAILED|Execution failed for task|\* What went wrong:|Caused by:|Exception)' gradle-build.log || true)
+          printf '%s\n' "$head_lines"
+          # Also surface these as an annotation: annotations are readable from the PR checks
+          # UI and the API even when raw job logs are not accessible.
+          head=$(printf '%s\n' "$head_lines" | head -n 12 | sed -e 's/%/%25/g' -e 's/\r/%0D/g' | paste -sd ' ' -)
+          if [[ -n "$head" ]]; then
+            echo "::error title=Gradle build diagnostics (first errors)::$head"
+          fi
           echo "--- end of gradle-build.log ---"
           tail -n 25 gradle-build.log
           summary=$(tail -n 30 gradle-build.log | sed -e 's/%/%25/g' -e 's/\r/%0D/g' | paste -sd ' ' -)
@@ -126,6 +133,8 @@ jobs:
             skipped += int(root.get('skipped', 0) or 0)
         print(f"Unit tests: {total} cases in {len(files)} classes "
               f"({failures} failures, {errors} errors, {skipped} skipped)")
+        print(f"::notice title=Unit tests executed::{total} cases in {len(files)} classes, "
+              f"{failures} failures, {errors} errors, {skipped} skipped")
 
         required = [
             'BackupPolicyTest',
@@ -159,7 +168,14 @@ jobs:
       run: |
         if [[ -f unit-test.log ]]; then
           echo "--- first errors in unit-test.log ---"
-          grep -n -m 25 -E '^(e: |error:|w: .*error|FAILURE:|> Task .*FAILED|Execution failed for task|\* What went wrong:|Caused by:|Exception)' unit-test.log || true
+          head_lines=$(grep -n -m 25 -E '^(e: |error:|w: .*error|FAILURE:|> Task .*FAILED|Execution failed for task|\* What went wrong:|Caused by:|Exception)' unit-test.log || true)
+          printf '%s\n' "$head_lines"
+          # Also surface these as an annotation: annotations are readable from the PR checks
+          # UI and the API even when raw job logs are not accessible.
+          head=$(printf '%s\n' "$head_lines" | head -n 12 | sed -e 's/%/%25/g' -e 's/\r/%0D/g' | paste -sd ' ' -)
+          if [[ -n "$head" ]]; then
+            echo "::error title=Unit test diagnostics (first errors)::$head"
+          fi
           echo "--- end of unit-test.log ---"
           tail -n 25 unit-test.log
           summary=$(tail -n 30 unit-test.log | sed -e 's/%/%25/g' -e 's/\r/%0D/g' | paste -sd ' ' -)
@@ -183,7 +199,14 @@ jobs:
       run: |
         if [[ -f lint.log ]]; then
           echo "--- first errors in lint.log ---"
-          grep -n -m 25 -E '^(e: |error:|w: .*error|FAILURE:|> Task .*FAILED|Execution failed for task|\* What went wrong:|Caused by:|Exception)' lint.log || true
+          head_lines=$(grep -n -m 25 -E '^(e: |error:|w: .*error|FAILURE:|> Task .*FAILED|Execution failed for task|\* What went wrong:|Caused by:|Exception)' lint.log || true)
+          printf '%s\n' "$head_lines"
+          # Also surface these as an annotation: annotations are readable from the PR checks
+          # UI and the API even when raw job logs are not accessible.
+          head=$(printf '%s\n' "$head_lines" | head -n 12 | sed -e 's/%/%25/g' -e 's/\r/%0D/g' | paste -sd ' ' -)
+          if [[ -n "$head" ]]; then
+            echo "::error title=Android lint diagnostics (first errors)::$head"
+          fi
           echo "--- end of lint.log ---"
           tail -n 25 lint.log
           summary=$(tail -n 30 lint.log | sed -e 's/%/%25/g' -e 's/\r/%0D/g' | paste -sd ' ' -)
@@ -295,6 +318,8 @@ jobs:
             skipped += int(root.get('skipped', 0) or 0)
         print(f"Instrumented tests: {total} cases in {len(files)} classes "
               f"({failures} failures, {errors} errors, {skipped} skipped)")
+        print(f"::notice title=Instrumented tests executed::{total} cases in {len(files)} classes, "
+              f"{failures} failures, {errors} errors, {skipped} skipped")
         if total == 0:
             sys.exit('::error title=Instrumented test verification failed::zero test cases executed')
         if failures or errors:
@@ -307,7 +332,14 @@ jobs:
       run: |
         if [[ -f instrumentation.log ]]; then
           echo "--- first errors in instrumentation.log ---"
-          grep -n -m 25 -E '^(e: |error:|w: .*error|FAILURE:|> Task .*FAILED|Execution failed for task|\* What went wrong:|Caused by:|Exception)' instrumentation.log || true
+          head_lines=$(grep -n -m 25 -E '^(e: |error:|w: .*error|FAILURE:|> Task .*FAILED|Execution failed for task|\* What went wrong:|Caused by:|Exception)' instrumentation.log || true)
+          printf '%s\n' "$head_lines"
+          # Also surface these as an annotation: annotations are readable from the PR checks
+          # UI and the API even when raw job logs are not accessible.
+          head=$(printf '%s\n' "$head_lines" | head -n 12 | sed -e 's/%/%25/g' -e 's/\r/%0D/g' | paste -sd ' ' -)
+          if [[ -n "$head" ]]; then
+            echo "::error title=Instrumented test diagnostics (first errors)::$head"
+          fi
           echo "--- end of instrumentation.log ---"
           tail -n 25 instrumentation.log
           summary=$(tail -n 30 instrumentation.log | sed -e 's/%/%25/g' -e 's/\r/%0D/g' | paste -sd ' ' -)

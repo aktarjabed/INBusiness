@@ -19,7 +19,7 @@ import org.junit.Test
  */
 class InvoiceHistoryFilterTest {
 
-    private fun query(
+    private fun builtQuery(
         search: String? = null,
         startDate: Long? = null,
         endDate: Long? = null,
@@ -28,7 +28,7 @@ class InvoiceHistoryFilterTest {
         documentType: String? = null,
         limit: Int = 50,
         offset: Int = 0
-    ) = InvoiceHistoryFilter(
+    ): InvoiceHistoryFilter.BuiltQuery = InvoiceHistoryFilter(
         businessId = "biz-1",
         search = search,
         startDate = startDate,
@@ -38,40 +38,39 @@ class InvoiceHistoryFilterTest {
         documentType = documentType,
         limit = limit,
         offset = offset
-    ).toSQLiteQuery()
+    ).buildQuery()
 
     private fun placeholderCount(sql: String): Int = sql.count { it == '?' }
 
     @Test
     fun alwaysScopesToTheActiveBusiness() {
-        val q = query()
+        val q = builtQuery()
         assertTrue(q.sql.startsWith("SELECT * FROM invoices WHERE businessId = ?"))
-        assertEquals(listOf<Any>("biz-1"), q.arguments.toList())
+        assertEquals(listOf<Any?>("biz-1"), q.args)
         assertTrue(q.sql.endsWith("ORDER BY createdAt DESC LIMIT ? OFFSET ?"))
     }
 
     @Test
     fun paginationIsAlwaysBound() {
-        val q = query(limit = 25, offset = 100)
-        val args = q.arguments.toList()
-        assertEquals(25, args[args.size - 2])
-        assertEquals(100, args[args.size - 1])
+        val q = builtQuery(limit = 25, offset = 100)
+        assertEquals(25, q.args[q.args.size - 2])
+        assertEquals(100, q.args[q.args.size - 1])
     }
 
     @Test
     fun maliciousSearchInputIsNeverInterpolated() {
         val payload = "'; DROP TABLE invoices; --"
-        val q = query(search = payload)
+        val q = builtQuery(search = payload)
 
         assertFalse(q.sql.contains("DROP TABLE"))
         assertTrue(q.sql.contains("invoiceNumber LIKE '%' || ? || '%'"))
-        assertTrue(q.arguments.toList().contains(payload))
-        assertEquals(placeholderCount(q.sql), q.arguments.size)
+        assertTrue(q.args.contains(payload))
+        assertEquals(placeholderCount(q.sql), q.args.size)
     }
 
     @Test
     fun filterValuesAreBoundInDeclarationOrder() {
-        val q = query(
+        val q = builtQuery(
             search = "Ramesh",
             startDate = 1_000L,
             endDate = 2_000L,
@@ -81,46 +80,52 @@ class InvoiceHistoryFilterTest {
             offset = 5
         )
         assertEquals(
-            listOf<Any>("biz-1", "Ramesh", "Ramesh", 1_000L, 2_000L, "COMPLETED", "TAX_INVOICE", 10, 5),
-            q.arguments.toList()
+            listOf<Any?>("biz-1", "Ramesh", "Ramesh", 1_000L, 2_000L, "COMPLETED", "TAX_INVOICE", 10, 5),
+            q.args
         )
     }
 
     @Test
     fun paymentStatusFiltersAreClosedSet() {
-        assertTrue(query(paymentStatus = "PAID").sql.contains("balanceDue <= 0 AND status = 'COMPLETED'"))
-        assertTrue(query(paymentStatus = "UNPAID").sql.contains("balanceDue > 0 AND status = 'COMPLETED'"))
+        assertTrue(builtQuery(paymentStatus = "PAID").sql.contains("balanceDue <= 0 AND status = 'COMPLETED'"))
+        assertTrue(builtQuery(paymentStatus = "UNPAID").sql.contains("balanceDue > 0 AND status = 'COMPLETED'"))
     }
 
     @Test
     fun blankSearchIsIgnored() {
-        assertEquals(query().sql, query(search = "   ").sql)
+        assertEquals(builtQuery().sql, builtQuery(search = "   ").sql)
+        assertEquals(builtQuery().args, builtQuery(search = "   ").args)
     }
 
     @Test
     fun boundArgumentCountMatchesPlaceholdersForEveryCombination() {
         val variants = listOf(
-            query(),
-            query(search = "x"),
-            query(startDate = 1L),
-            query(endDate = 2L),
-            query(status = "CANCELLED"),
-            query(paymentStatus = "PAID"),
-            query(documentType = "BILL_OF_SUPPLY"),
-            query("x", 1L, 2L, "COMPLETED", "UNPAID", "TAX_INVOICE")
+            builtQuery(),
+            builtQuery(search = "x"),
+            builtQuery(startDate = 1L),
+            builtQuery(endDate = 2L),
+            builtQuery(status = "CANCELLED"),
+            builtQuery(paymentStatus = "PAID"),
+            builtQuery(documentType = "BILL_OF_SUPPLY"),
+            builtQuery("x", 1L, 2L, "COMPLETED", "UNPAID", "TAX_INVOICE")
         )
 
         variants.forEach { q ->
             assertEquals(
                 "placeholder/bind mismatch for: ${q.sql}",
                 placeholderCount(q.sql),
-                q.arguments.size
+                q.args.size
             )
         }
     }
 
     @Test
     fun rawQueryIsConstructedAsSimpleQuery() {
-        assertTrue(query(search = "x") is SimpleSQLiteQuery)
+        val filter = InvoiceHistoryFilter(businessId = "biz-1", search = "x")
+
+        val rawQuery = filter.toSQLiteQuery()
+        assertTrue(rawQuery is SimpleSQLiteQuery)
+        // The DAO receives exactly the SQL the builder produced.
+        assertEquals(filter.buildQuery().sql, rawQuery.sql)
     }
 }
