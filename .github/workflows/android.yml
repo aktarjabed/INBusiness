@@ -126,6 +126,7 @@ jobs:
         files = sorted(glob.glob('app/build/test-results/testDebugUnitTest/TEST-*.xml'))
         total = failures = errors = skipped = 0
         failing = []
+        skipped_tests = []
         classes = set()
         for path in files:
             root = ET.parse(path).getroot()
@@ -139,6 +140,9 @@ jobs:
                 for bad in list(case.iter('failure')) + list(case.iter('error')):
                     message = ' '.join((bad.get('message') or bad.text or '').split())
                     failing.append(f"{case.get('classname')}.{case.get('name')}: {message[:200]}")
+                for skip in case.iter('skipped'):
+                    message = ' '.join((skip.get('message') or skip.text or '').split())
+                    skipped_tests.append(f"{case.get('classname')}.{case.get('name')}: {message[:220]}")
 
         # Name every failing case in an annotation: raw job logs and report artifacts are not
         # always retrievable, so the annotation is the durable diagnostic channel.
@@ -349,6 +353,8 @@ jobs:
 
         for entry in failing[:25]:
             print(f"::error title=Failing instrumented test::{entry}")
+        for entry in skipped_tests[:10]:
+            print(f"::notice title=Skipped instrumented test::{entry}")
         print(f"Instrumented tests: {total} cases in {len(classes)} classes "
               f"({failures} failures, {errors} errors, {skipped} skipped)")
         print(f"::notice title=Instrumented tests executed::{total} cases in {len(classes)} classes, "

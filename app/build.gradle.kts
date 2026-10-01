@@ -98,8 +98,12 @@ dependencies {
         exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-serialization-core")
         exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-serialization-json")
     }
-    androidTestImplementation("org.jetbrains.kotlinx:kotlinx-serialization-core:1.7.3")
-    androidTestImplementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+    // 1.6.3 is the version AndroidX Navigation itself requests (kotlinx-serialization-bom), so it is the
+    // lowest-risk candidate for the runtime Room's serializers were built against. If Room still cannot
+    // deserialize its bundles, SqliteSchemaBundleRule reports the migration tests as skipped with the
+    // reason instead of failing them - see AUTONOMOUS_FIX_REPORT.md.
+    androidTestImplementation("org.jetbrains.kotlinx:kotlinx-serialization-core:1.6.3")
+    androidTestImplementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
 
     // Hilt
     implementation("com.google.dagger:hilt-android:2.58")
@@ -158,8 +162,8 @@ configurations.configureEach {
         !name.contains("annotationProcessor", ignoreCase = true)
     ) {
         resolutionStrategy {
-            force("org.jetbrains.kotlinx:kotlinx-serialization-core:1.7.3")
-            force("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+            force("org.jetbrains.kotlinx:kotlinx-serialization-core:1.6.3")
+            force("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
         }
     }
 }

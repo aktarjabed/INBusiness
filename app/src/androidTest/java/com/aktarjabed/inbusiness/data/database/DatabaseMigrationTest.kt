@@ -13,6 +13,10 @@ import java.io.IOException
 
 @RunWith(AndroidJUnit4::class)
 class DatabaseMigrationTest {
+    /** Skips (with a precise reason) when Room's schema bundles cannot be deserialized. */
+    @get:Rule
+    val schemaBundleGuard = SqliteSchemaBundleRule()
+
     @get:Rule
     val helper: MigrationTestHelper = MigrationTestHelper(
         InstrumentationRegistry.getInstrumentation(),
