@@ -159,20 +159,6 @@ class InvoiceRepository @Inject constructor(
                             ))
                         }
 
-                        database.stockMovementDao().insertMovement(
-                            com.aktarjabed.inbusiness.data.entities.StockMovement(
-                                businessId = businessId.toLong(),
-                                productId = item.productId,
-                                movementType = "SALE",
-                                quantity = -item.quantity,
-                                stockBefore = product.availableStock,
-                                stockAfter = product.availableStock - item.quantity,
-                                referenceType = "INVOICE",
-                                referenceId = invoiceId,
-                                reason = "Invoice creation"
-                            )
-                        )
-
                         stockMovementDao.insertMovement(
                             com.aktarjabed.inbusiness.data.entities.StockMovement(
                                 businessId = businessId.toLong(),

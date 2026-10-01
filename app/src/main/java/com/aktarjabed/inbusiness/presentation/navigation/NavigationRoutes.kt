@@ -14,6 +14,7 @@ object NavigationRoutes {
     const val INVENTORY = "inventory"
     const val ADD_PRODUCT = "addProduct"
     const val EDIT_PRODUCT = "editProduct/{productId}"
+    const val INVOICE_HISTORY = "invoiceHistory"
 
     // Helper functions for parameterized routes
     fun invoicePreview(invoiceId: String) = "invoice-preview/$invoiceId"
