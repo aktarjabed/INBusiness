@@ -8,7 +8,18 @@ plugins {
 
 kapt {
     arguments {
-        arg("room.schemaLocation", "$projectDir/schemas")
+        // Schema export is opt-in (`-ProomSchemaExport=true`, used by the CI schema job). When a
+        // schema file for the current version already exists, Room's processor *deserializes* it
+        // through kotlinx-serialization on the annotation-processor classpath. That classpath is
+        // not covered by the version pin below, and Room 2.8.5 ships serializers compiled against
+        // kotlinx-serialization 1.7.x while its POM pulls 1.8.1 - deserialization therefore crashes
+        // with `AbstractMethodError: FieldBundle$$serializer ... typeParametersSerializers()`.
+        // Ordinary builds (app + instrumented tests) do not need to re-export the schema; they read
+        // the checked-in JSON from `app/schemas`, which is also what the migration tests consume.
+        // CI regenerates and diffs it in the dedicated schema step, so drift is still caught.
+        if (project.hasProperty("roomSchemaExport")) {
+            arg("room.schemaLocation", "$projectDir/schemas")
+        }
     }
 }
 
@@ -129,8 +140,17 @@ dependencies {
 // against restores those serializers; nothing in this app uses kotlinx-serialization directly, and
 // the only other consumer (navigation-common 2.8.9) declares 1.6.3.
 configurations.configureEach {
-    resolutionStrategy {
-        force("org.jetbrains.kotlinx:kotlinx-serialization-core:1.7.3")
-        force("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+    // Annotation-processor/kapt classpaths are deliberately excluded: Room's schema-export code
+    // runs there and is sensitive to exactly which serialization classes it loads (see the kapt
+    // block above). Forcing versions into those classpaths is what broke `:app:kaptDebugKotlin`,
+    // so this pin covers only the app's compile/runtime/test classpaths - where the mismatch
+    // actually surfaced as an AbstractMethodError inside MigrationTestHelper.
+    if (!name.contains("kapt", ignoreCase = true) &&
+        !name.contains("annotationProcessor", ignoreCase = true)
+    ) {
+        resolutionStrategy {
+            force("org.jetbrains.kotlinx:kotlinx-serialization-core:1.7.3")
+            force("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+        }
     }
 }

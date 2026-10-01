@@ -77,7 +77,7 @@ jobs:
       shell: bash
       run: |
         set -o pipefail
-        ./gradlew clean :app:kaptDebugKotlin --no-build-cache --stacktrace --console=plain 2>&1 | tee room-schema.log
+        ./gradlew clean :app:kaptDebugKotlin --no-build-cache -ProomSchemaExport=true --stacktrace --console=plain 2>&1 | tee room-schema.log
 
     - name: Report Room schema generation failure
       if: steps.generate_room_schema.outcome == 'failure'

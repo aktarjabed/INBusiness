@@ -61,6 +61,9 @@ Prerequisites:
 
 # Instrumented tests — require an emulator/device (API 36 recommended)
 ./gradlew connectedDebugAndroidTest
+
+# Regenerate the Room schema JSON for the current version (opt-in; see Database & Migrations)
+./gradlew :app:kaptDebugKotlin -ProomSchemaExport=true
 ```
 
 CI (`.github/workflows/android.yml`) runs the debug build, unit tests, Android Lint, a Room schema-drift check, and the instrumented suite on an emulator.
@@ -70,6 +73,11 @@ CI (`.github/workflows/android.yml`) runs the debug build, unit tests, Android L
 - Single `AppDatabase` (SQLCipher encrypted), currently at **schema version 19**.
 - All migrations live in `AppDatabase.Companion` and are non-destructive: existing rows are copied forward, never dropped.
 - Checked-in schema snapshots are in `app/schemas/.../`; the CI job fails if the generated schema drifts from the checked-in JSON.
+- Schema export is **opt-in** (`-ProomSchemaExport=true`): an ordinary build does not re-export, because
+  Room's processor deserializes the existing snapshot with the `kotlinx-serialization` classes on the
+  annotation-processor classpath, and Room 2.8.5's bundled serializers predate the 1.8 interface
+  (`AbstractMethodError: FieldBundle$$serializer ... typeParametersSerializers()`). Tests read the
+  checked-in JSON directly, and CI regenerates and diffs it, so drift is still caught.
 - Adding a column/index requires a new `Migration`, a bumped `@Database(version = ...)`, a regenerated schema JSON **and** an entry in the workflow's schema-verification step.
 - Migrations that recreate tables run `PRAGMA defer_foreign_keys=ON` (the documented replacement for `PRAGMA foreign_keys=OFF`, which SQLite silently ignores inside a migration transaction).
 - Regression coverage: `DatabaseMigrationTest`, `ProductMigrationTest`, `MigrationTest`, plus the JVM suites under `app/src/test`.
