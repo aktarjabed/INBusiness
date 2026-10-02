@@ -6,6 +6,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -23,8 +25,11 @@ import com.patrykandpatrick.vico.core.cartesian.data.CartesianValueFormatter
 import com.patrykandpatrick.vico.core.cartesian.data.columnSeries
 import com.aktarjabed.inbusiness.presentation.components.MetricCard
 import com.aktarjabed.inbusiness.presentation.screens.dashboard.DashboardViewModel
+import java.text.NumberFormat
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -72,6 +77,16 @@ fun DashboardScreen(
                 v >= 1_000 -> "₹${String.format("%.1f", v / 1_000)}K"
                 else -> "₹${String.format("%.0f", v)}"
             }
+        }
+    }
+
+    // A custom chart is not inherently understandable to TalkBack. Expose its daily values as
+    // one concise text description instead of announcing an unlabeled canvas.
+    val chartDescription = remember(state.chartData) {
+        val currency = NumberFormat.getCurrencyInstance(Locale.forLanguageTag("en-IN"))
+        val dateFormatter = DateTimeFormatter.ofLocalizedDate(FormatStyle.LONG)
+        "Seven-day revenue chart. " + state.chartData.joinToString(separator = ". ") { point ->
+            "${point.date.format(dateFormatter)}: ${currency.format(point.revenue)}"
         }
     }
 
@@ -169,6 +184,7 @@ fun DashboardScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(220.dp)
+                            .semantics(mergeDescendants = true) { contentDescription = chartDescription }
                     )
                 } else {
                     Text(
