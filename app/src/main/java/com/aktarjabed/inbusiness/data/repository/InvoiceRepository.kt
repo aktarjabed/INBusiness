@@ -12,6 +12,7 @@ import com.aktarjabed.inbusiness.data.entities.InvoiceSequence
 import com.aktarjabed.inbusiness.domain.invoice.CalculateInvoiceTotalsUseCase
 import com.aktarjabed.inbusiness.domain.invoice.InvoiceCreationResult
 import com.aktarjabed.inbusiness.domain.invoice.SupplyType
+import com.aktarjabed.inbusiness.domain.invoice.collapseHistoryToLatest
 import com.aktarjabed.inbusiness.domain.context.BusinessContext
 import com.aktarjabed.inbusiness.domain.quota.QuotaGate
 import com.aktarjabed.inbusiness.domain.quota.QuotaVerdict
@@ -19,6 +20,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import java.time.Instant
 import java.util.UUID
@@ -26,7 +28,14 @@ import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 
-private class TransactionAbortException(val result: com.aktarjabed.inbusiness.domain.invoice.InvoiceCreationResult) : Exception()
+private class TransactionAbortException(val result: com.aktarjabed.inbusiness.domain.invoice.InvoiceCreationResult) : Exception() {
+    /**
+     * Aborting a transaction is normal control flow here (quota exceeded, insufficient stock,
+     * idempotent replay), and JVM stack-trace capture on every expected rejection is pure
+     * overhead on a hot path. Domain failure details live in [result], not in a stack trace.
+     */
+    override fun fillInStackTrace(): Throwable = this
+}
 
 @Singleton
 class InvoiceRepository @Inject constructor(
@@ -61,8 +70,19 @@ class InvoiceRepository @Inject constructor(
         return invoiceDao.getInvoiceItems(invoiceId, businessId)
     }
 
+    /**
+     * The latest line per product (or per free-text description for ad-hoc lines).
+     *
+     * The DAO returns the raw rows newest-first and the collapse happens here, so the query
+     * itself does not need the correlated "latest id per product" subquery that made it
+     * quadratic in the number of historical invoice lines. See
+     * [com.aktarjabed.inbusiness.data.dao.InvoiceDao.getHistoricalInvoiceItems].
+     */
     fun getHistoricalInvoiceItems(): Flow<List<InvoiceItem>> {
-        return businessContext.activeBusinessId.flatMapLatest { businessId -> invoiceDao.getHistoricalInvoiceItems(businessId) }
+        return businessContext.activeBusinessId.flatMapLatest { businessId ->
+            invoiceDao.getHistoricalInvoiceItems(businessId)
+                .map { items -> items.collapseHistoryToLatest() }
+        }
     }
 
 
@@ -86,8 +106,18 @@ class InvoiceRepository @Inject constructor(
             return@withContext InvoiceCreationResult.InvalidRequest("Select a valid payment method for the initial payment")
         }
 
-        val businessId = businessContext.activeBusinessId.first()
-        val userId = businessContext.currentUserId.first()
+        // A DataStore read failure (or a missing context value) has to come back as a typed
+        // InvoiceCreationResult like any other failure: callers switch on the returned result
+        // instead of catching exceptions, so letting one escape here would surface as a crash.
+        // Both reads happen *before* withTransaction opens, so a database transaction is never
+        // held open across unrelated DataStore I/O.
+        val (businessId, userId) = try {
+            businessContext.activeBusinessId.first() to businessContext.currentUserId.first()
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            Log.e(TAG, "Business context unavailable; cannot create an invoice", e)
+            return@withContext InvoiceCreationResult.UnexpectedFailure(e)
+        }
 
         var requestFingerprint: String? = null
 
@@ -285,8 +315,10 @@ class InvoiceRepository @Inject constructor(
     }
 
     suspend fun cancelInvoice(invoiceId: String): com.aktarjabed.inbusiness.domain.invoice.InvoiceCreationResult = withContext(Dispatchers.IO) {
-        val businessId = businessContext.activeBusinessId.first()
         try {
+            // Inside the try so a DataStore/context failure is reported through the same
+            // typed result as every other cancellation failure instead of escaping.
+            val businessId = businessContext.activeBusinessId.first()
             val invoiceNumber = database.withTransaction {
                 val invoice = invoiceDao.getInvoiceById(invoiceId, businessId)
                     ?: throw TransactionAbortException(InvoiceCreationResult.InvalidRequest("Invoice not found"))

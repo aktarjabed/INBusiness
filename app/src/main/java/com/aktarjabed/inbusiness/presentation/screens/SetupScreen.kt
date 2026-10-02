@@ -3,10 +3,12 @@ package com.aktarjabed.inbusiness.presentation.screens
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aktarjabed.inbusiness.domain.invoice.GstCalculator
 import com.aktarjabed.inbusiness.presentation.viewmodel.SetupViewModel
 
@@ -15,12 +17,12 @@ fun SetupScreen(
     viewModel: SetupViewModel = hiltViewModel(),
     onSetupComplete: () -> Unit
 ) {
-    var name by remember { mutableStateOf("") }
-    var address by remember { mutableStateOf("") }
-    var gstin by remember { mutableStateOf("") }
+    var name by rememberSaveable { mutableStateOf("") }
+    var address by rememberSaveable { mutableStateOf("") }
+    var gstin by rememberSaveable { mutableStateOf("") }
 
-    val setupComplete by viewModel.setupComplete.collectAsState()
-    val error by viewModel.error.collectAsState()
+    val setupComplete by viewModel.setupComplete.collectAsStateWithLifecycle()
+    val error by viewModel.error.collectAsStateWithLifecycle()
 
     // Surface an invalid GSTIN immediately instead of letting it silently disable
     // supply-type detection (and therefore invoicing) later on.

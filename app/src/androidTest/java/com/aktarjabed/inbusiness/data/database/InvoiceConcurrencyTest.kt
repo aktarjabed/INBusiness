@@ -92,7 +92,7 @@ class InvoiceConcurrencyTest {
                     id = BIZ_ID,
                     name = "Test Business",
                     address = "Test Address",
-                    gstin = "27AAAAA0000A1Z5"
+                    gstin = "27AAAAA0000A1Z2"
                 )
             )
         }

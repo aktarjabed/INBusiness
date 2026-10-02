@@ -14,6 +14,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aktarjabed.inbusiness.domain.invoice.SupplyType
 import com.aktarjabed.inbusiness.domain.quota.QuotaVerdict
 import com.aktarjabed.inbusiness.presentation.components.LoadingScreen
@@ -28,19 +29,19 @@ fun InvoiceScreen(
     onNavigateToPreview: (String) -> Unit,
     viewModel: InvoiceViewModel = hiltViewModel()
 ) {
-    val uiState by viewModel.uiState.collectAsState()
-    val customerName by viewModel.customerName.collectAsState()
-    val customerGSTIN by viewModel.customerGSTIN.collectAsState()
-    val buyerAddress by viewModel.buyerAddress.collectAsState()
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val customerName by viewModel.customerName.collectAsStateWithLifecycle()
+    val customerGSTIN by viewModel.customerGSTIN.collectAsStateWithLifecycle()
+    val buyerAddress by viewModel.buyerAddress.collectAsStateWithLifecycle()
     // A non-blank GSTIN must be well formed: it drives supply-type detection and is
     // printed on the tax invoice, so a typo must be caught before submission.
     val customerGstinInvalid = customerGSTIN.isNotBlank() &&
         !com.aktarjabed.inbusiness.domain.invoice.GstCalculator.isValidGstin(customerGSTIN)
-    val supplyType by viewModel.supplyType.collectAsState()
-    val items by viewModel.invoiceItems.collectAsState()
-    val calculationResult by viewModel.calculationResult.collectAsState()
-    val productSuggestions by viewModel.productSuggestions.collectAsState()
-    val errorMessage by viewModel.errorMessage.collectAsState()
+    val supplyType by viewModel.supplyType.collectAsStateWithLifecycle()
+    val items by viewModel.invoiceItems.collectAsStateWithLifecycle()
+    val calculationResult by viewModel.calculationResult.collectAsStateWithLifecycle()
+    val productSuggestions by viewModel.productSuggestions.collectAsStateWithLifecycle()
+    val errorMessage by viewModel.errorMessage.collectAsStateWithLifecycle()
 
     var showAddItemDialog by remember { mutableStateOf(false) }
     var showUpgradeInfoDialog by remember { mutableStateOf(false) }
@@ -209,8 +210,8 @@ fun InvoiceScreen(
                         Spacer(modifier = Modifier.height(16.dp))
 
                         // Payment Details
-                        val amountPaid by viewModel.amountPaid.collectAsState()
-                        val paymentMethod by viewModel.paymentMethod.collectAsState()
+                        val amountPaid by viewModel.amountPaid.collectAsStateWithLifecycle()
+                        val paymentMethod by viewModel.paymentMethod.collectAsStateWithLifecycle()
                         Card(modifier = Modifier.fillMaxWidth()) {
                             Column(modifier = Modifier.padding(16.dp)) {
                                 Text("Payment Details", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)

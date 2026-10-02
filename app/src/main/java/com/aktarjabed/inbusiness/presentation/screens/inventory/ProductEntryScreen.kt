@@ -8,11 +8,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aktarjabed.inbusiness.presentation.components.SearchableDropdownField
 import com.aktarjabed.inbusiness.presentation.viewmodel.ProductViewModel
 import com.aktarjabed.inbusiness.presentation.viewmodel.SaveProductState
@@ -26,21 +28,21 @@ fun ProductEntryScreen(
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
 
-    val editingProduct by viewModel.editingProduct.collectAsState()
-    val saveState by viewModel.saveState.collectAsState()
-    val existingCategories by viewModel.existingCategories.collectAsState()
-    val existingUnitTypes by viewModel.existingUnitTypes.collectAsState()
+    val editingProduct by viewModel.editingProduct.collectAsStateWithLifecycle()
+    val saveState by viewModel.saveState.collectAsStateWithLifecycle()
+    val existingCategories by viewModel.existingCategories.collectAsStateWithLifecycle()
+    val existingUnitTypes by viewModel.existingUnitTypes.collectAsStateWithLifecycle()
 
-    var name by remember { mutableStateOf("") }
-    var brand by remember { mutableStateOf("") }
-    var category by remember { mutableStateOf("") }
-    var unitType by remember { mutableStateOf("") }
-    var pricePerUnitStr by remember { mutableStateOf("") }
-    var availableStockStr by remember { mutableStateOf("") }
-    var reorderThresholdStr by remember { mutableStateOf("") }
-    var batchNumber by remember { mutableStateOf("") }
-    var isWholesaleOnly by remember { mutableStateOf(false) }
-    var gstPercentageStr by remember { mutableStateOf("") }
+    var name by rememberSaveable { mutableStateOf("") }
+    var brand by rememberSaveable { mutableStateOf("") }
+    var category by rememberSaveable { mutableStateOf("") }
+    var unitType by rememberSaveable { mutableStateOf("") }
+    var pricePerUnitStr by rememberSaveable { mutableStateOf("") }
+    var availableStockStr by rememberSaveable { mutableStateOf("") }
+    var reorderThresholdStr by rememberSaveable { mutableStateOf("") }
+    var batchNumber by rememberSaveable { mutableStateOf("") }
+    var isWholesaleOnly by rememberSaveable { mutableStateOf(false) }
+    var gstPercentageStr by rememberSaveable { mutableStateOf("") }
 
     LaunchedEffect(productId) {
         if (productId != null) {

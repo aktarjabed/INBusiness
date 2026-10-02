@@ -19,6 +19,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aktarjabed.inbusiness.data.entities.Invoice
 import com.aktarjabed.inbusiness.data.entities.InvoiceItem
 import com.aktarjabed.inbusiness.presentation.components.LoadingScreen
@@ -36,9 +37,9 @@ fun InvoicePreviewScreen(
     onNavigateBack: () -> Unit,
     viewModel: InvoicePreviewViewModel = hiltViewModel()
 ) {
-    val uiState by viewModel.uiState.collectAsState()
-    val recordPaymentState by viewModel.recordPaymentState.collectAsState()
-    val cancelInvoiceState by viewModel.cancelInvoiceState.collectAsState()
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val recordPaymentState by viewModel.recordPaymentState.collectAsStateWithLifecycle()
+    val cancelInvoiceState by viewModel.cancelInvoiceState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }

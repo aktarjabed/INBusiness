@@ -1,6 +1,7 @@
 package com.aktarjabed.inbusiness.presentation.screens.invoice
 
 import android.util.Log
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.aktarjabed.inbusiness.data.entities.InvoiceItem
@@ -35,24 +36,37 @@ class InvoiceViewModel @Inject constructor(
     private val businessContext: BusinessContext,
     private val productRepository: ProductRepository,
     private val businessRepository: BusinessRepository,
-    private val getProductSuggestionsUseCase: GetProductSuggestionsUseCase
+    private val getProductSuggestionsUseCase: GetProductSuggestionsUseCase,
+    private val savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow<InvoiceUiState>(InvoiceUiState.Initial)
     val uiState: StateFlow<InvoiceUiState> = _uiState.asStateFlow()
 
-    // UI state for inputs
-    val customerName = MutableStateFlow("")
-    val customerGSTIN = MutableStateFlow("")
-    val buyerAddress = MutableStateFlow("")
+    // UI state for inputs.
+    //
+    // The draft is restored from [savedStateHandle] so process death (low memory, "don't keep
+    // activities", swipe-away) does not discard a half-composed invoice; [persistDraft] mirrors
+    // every change back. Seller fields are excluded on purpose: they come from the business
+    // profile and are re-read on load.
+    val customerName = MutableStateFlow(savedStateHandle.get<String>(KEY_CUSTOMER_NAME) ?: "")
+    val customerGSTIN = MutableStateFlow(savedStateHandle.get<String>(KEY_CUSTOMER_GSTIN) ?: "")
+    val buyerAddress = MutableStateFlow(savedStateHandle.get<String>(KEY_BUYER_ADDRESS) ?: "")
 
     val sellerName = MutableStateFlow("")
     val sellerAddress = MutableStateFlow("")
     val sellerGstin = MutableStateFlow("")
-    val supplyType = MutableStateFlow(SupplyType.UNKNOWN)
+    val supplyType = MutableStateFlow(
+        savedStateHandle.get<String>(KEY_SUPPLY_TYPE)
+            ?.let { stored -> runCatching { SupplyType.valueOf(stored) }.getOrNull() }
+            ?: SupplyType.UNKNOWN
+    )
 
     // Items state
-    private val _invoiceItems = MutableStateFlow<List<InvoiceItemInput>>(emptyList())
+    private val _invoiceItems = MutableStateFlow(
+        InvoiceDraftCodec.decode(savedStateHandle.get<String>(KEY_DRAFT_ITEMS))
+    )
+    // Transient: an open edit dialog is not worth restoring, the items themselves are.
     private var editingItemIndex: Int? = null
     val invoiceItems = _invoiceItems.asStateFlow()
 
@@ -63,8 +77,8 @@ class InvoiceViewModel @Inject constructor(
     private val _productSuggestions = MutableStateFlow<List<ProductSuggestion>>(emptyList())
     val productSuggestions = _productSuggestions.asStateFlow()
 
-    val amountPaid = MutableStateFlow(0.0)
-    val paymentMethod = MutableStateFlow("NONE")
+    val amountPaid = MutableStateFlow(savedStateHandle.get<Double>(KEY_AMOUNT_PAID) ?: 0.0)
+    val paymentMethod = MutableStateFlow(savedStateHandle.get<String>(KEY_PAYMENT_METHOD) ?: "NONE")
 
     // Error message for surfacing calculation errors to the UI
     private val _errorMessage = MutableStateFlow<String?>(null)
@@ -80,7 +94,12 @@ class InvoiceViewModel @Inject constructor(
      * ("Idempotency key reused for a different payload") which would otherwise
      * permanently block the user from saving an edited invoice.
      */
-    private var currentIdempotencyKey: String? = null
+    /**
+     * Restored as well: a retry of the same payload after process death must reuse the key,
+     * otherwise the retry would look like a brand-new invoice. It is cleared as soon as the
+     * payload changes (see [invalidatePendingIdempotencyKey]).
+     */
+    private var currentIdempotencyKey: String? = savedStateHandle.get<String>(KEY_IDEMPOTENCY_KEY)
 
     /** Guards against double-tap submissions before the UI state flips to Loading. */
     private var invoiceCreationInFlight = false
@@ -115,6 +134,10 @@ class InvoiceViewModel @Inject constructor(
                 Log.e(TAG, "Failed to load business data for GSTIN", e)
             }
         }
+
+        // Restored draft values only populate the inputs; totals are derived, so recompute them
+        // or the screen returns from process death showing an empty summary.
+        recalculateItems()
     }
 
     fun checkQuotaAndPrepare() {
@@ -162,6 +185,7 @@ class InvoiceViewModel @Inject constructor(
             supplyType.value = determineSupplyTypeUseCase(sellerGstin.value, normalizedGstin)
         }
         recalculateItems()
+        persistDraft()
     }
 
 
@@ -170,6 +194,7 @@ class InvoiceViewModel @Inject constructor(
         amountPaid.value = normalized
         invalidatePendingIdempotencyKey()
         recalculateItems()
+        persistDraft()
     }
 
     fun setPaymentMethod(method: String) {
@@ -177,12 +202,14 @@ class InvoiceViewModel @Inject constructor(
             invalidatePendingIdempotencyKey()
         }
         paymentMethod.value = method
+        persistDraft()
     }
 
     fun setSupplyType(type: SupplyType) {
         supplyType.value = type
         invalidatePendingIdempotencyKey()
         recalculateItems()
+        persistDraft()
     }
 
 
@@ -202,6 +229,7 @@ class InvoiceViewModel @Inject constructor(
         _invoiceItems.value = currentItems
         invalidatePendingIdempotencyKey()
         recalculateItems()
+        persistDraft()
     }
 
     fun removeItem(index: Int) {
@@ -211,6 +239,7 @@ class InvoiceViewModel @Inject constructor(
             _invoiceItems.value = currentItems
             invalidatePendingIdempotencyKey()
             recalculateItems()
+            persistDraft()
         }
     }
 
@@ -220,6 +249,23 @@ class InvoiceViewModel @Inject constructor(
      */
     private fun invalidatePendingIdempotencyKey() {
         currentIdempotencyKey = null
+    }
+
+    /**
+     * Mirrors the in-progress invoice into [savedStateHandle] so it survives process death.
+     *
+     * Every mutator must call this: a new draft field that is not persisted here silently
+     * disappears on restore. Seller fields and `editingItemIndex` are intentionally excluded.
+     */
+    private fun persistDraft() {
+        savedStateHandle[KEY_CUSTOMER_NAME] = customerName.value
+        savedStateHandle[KEY_CUSTOMER_GSTIN] = customerGSTIN.value
+        savedStateHandle[KEY_BUYER_ADDRESS] = buyerAddress.value
+        savedStateHandle[KEY_SUPPLY_TYPE] = supplyType.value.name
+        savedStateHandle[KEY_DRAFT_ITEMS] = InvoiceDraftCodec.encode(_invoiceItems.value)
+        savedStateHandle[KEY_AMOUNT_PAID] = amountPaid.value
+        savedStateHandle[KEY_PAYMENT_METHOD] = paymentMethod.value
+        savedStateHandle[KEY_IDEMPOTENCY_KEY] = currentIdempotencyKey
     }
 
     private fun recalculateItems() {
@@ -314,6 +360,9 @@ class InvoiceViewModel @Inject constructor(
 
                 val idempotencyKey = currentIdempotencyKey
                     ?: java.util.UUID.randomUUID().toString().also { currentIdempotencyKey = it }
+                // Persist the key before submitting: a crash mid-submit must not let the retry
+                // be treated as a new request.
+                persistDraft()
 
                 val rawItems = validInputs.map { input ->
                     InvoiceItem(
@@ -342,6 +391,7 @@ class InvoiceViewModel @Inject constructor(
                         // The request is persisted and confirmed; a subsequent submission is a
                         // genuinely new invoice and must not reuse this key.
                         invalidatePendingIdempotencyKey()
+                        persistDraft()
                         _uiState.value = InvoiceUiState.Success(
                             invoiceId = result.invoiceId,
                             message = "Invoice ${result.invoiceNumber} created successfully"
@@ -349,6 +399,7 @@ class InvoiceViewModel @Inject constructor(
                     }
                     is InvoiceCreationResult.IdempotentReplay -> {
                         invalidatePendingIdempotencyKey()
+                        persistDraft()
                          _uiState.value = InvoiceUiState.Success(
                             invoiceId = result.invoiceId,
                             message = "Invoice already created"
@@ -389,6 +440,7 @@ class InvoiceViewModel @Inject constructor(
     fun resetState() {
         _uiState.value = InvoiceUiState.Initial
         invalidatePendingIdempotencyKey()
+        persistDraft()
     }
 
     fun clearError() {
@@ -401,6 +453,15 @@ class InvoiceViewModel @Inject constructor(
 
     companion object {
         private const val TAG = "InvoiceViewModel"
+
+        private const val KEY_CUSTOMER_NAME = "draft_customer_name"
+        private const val KEY_CUSTOMER_GSTIN = "draft_customer_gstin"
+        private const val KEY_BUYER_ADDRESS = "draft_buyer_address"
+        private const val KEY_SUPPLY_TYPE = "draft_supply_type"
+        private const val KEY_DRAFT_ITEMS = "draft_items"
+        private const val KEY_AMOUNT_PAID = "draft_amount_paid"
+        private const val KEY_PAYMENT_METHOD = "draft_payment_method"
+        private const val KEY_IDEMPOTENCY_KEY = "draft_idempotency_key"
     }
 }
 

@@ -8,6 +8,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.patrykandpatrick.vico.compose.cartesian.CartesianChartHost
 import com.patrykandpatrick.vico.compose.cartesian.axis.rememberAxisGuidelineComponent
 import com.patrykandpatrick.vico.compose.cartesian.axis.rememberBottom
@@ -34,7 +35,7 @@ fun DashboardScreen(
     onNavigateToInventory: () -> Unit,
     onNavigateToHistory: () -> Unit = {}
 ) {
-    val state by viewModel.uiState.collectAsState()
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
 
     // The metric cards are live SQL flows, but the seven-day chart is loaded imperatively.
     // Re-run the load whenever the screen is (re)entered so an invoice created in another

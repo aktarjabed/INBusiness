@@ -28,16 +28,27 @@ class ProductViewModel @Inject constructor(
     private val searchQuery = MutableStateFlow("")
     private val selectedCategory = MutableStateFlow<String?>(null)
 
+    /**
+     * Products for the current search/category filter.
+     *
+     * The `debounce` is load-bearing: the search SQL is `LIKE '%query%'` (a leading wildcard
+     * means no index can be used, so it is a full scan of the business's products), and the
+     * query string is bound as a Room parameter on every emission. Without a debounce, typing
+     * "fertilizer" runs ten full scans and re-emits ten times on the main-thread-adjacent UI
+     * path. 300 ms matches InvoiceHistoryViewModel's search debounce.
+     */
     @OptIn(ExperimentalCoroutinesApi::class)
     val products: StateFlow<List<Product>> = combine(searchQuery, selectedCategory) { query, category ->
         Pair(query, category)
-    }.flatMapLatest { (query, category) ->
-        if (category == null) {
-            productRepository.searchProducts(query)
-        } else {
-            productRepository.searchProductsByCategory(query, category)
-        }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    }.debounce(SEARCH_DEBOUNCE_MS)
+        .distinctUntilChanged()
+        .flatMapLatest { (query, category) ->
+            if (category == null) {
+                productRepository.searchProducts(query)
+            } else {
+                productRepository.searchProductsByCategory(query, category)
+            }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val existingCategories: StateFlow<List<String>> = productRepository.getUniqueCategories()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -131,5 +142,8 @@ class ProductViewModel @Inject constructor(
 
     companion object {
         private const val TAG = "ProductViewModel"
+
+        /** See [products]: search runs a full scan per keystroke without this. */
+        private const val SEARCH_DEBOUNCE_MS = 300L
     }
 }

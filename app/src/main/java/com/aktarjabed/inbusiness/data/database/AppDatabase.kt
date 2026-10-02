@@ -93,7 +93,23 @@ abstract class AppDatabase : RoomDatabase() {
                         PRIMARY KEY(`id`)
                     )
                 """)
-                db.execSQL("INSERT INTO invoices_new SELECT * FROM invoices")
+                // Columns are listed explicitly on purpose: `INSERT INTO ... SELECT *` only
+                // copies correctly while the old table's physical column order matches the new
+                // one, and silently writes values into the wrong columns when it does not
+                // (e.g. taxAmount ending up in totalAmount). Naming the columns turns any
+                // divergence into a loud failure instead of quietly corrupting money.
+                db.execSQL(
+                    """
+                    INSERT INTO invoices_new (
+                        id, businessId, invoiceNumber, customerId, customerName, customerGSTIN,
+                        totalAmount, taxAmount, createdAt, updatedAt, irn, ackNo, ackDate, qrCodeData
+                    )
+                    SELECT
+                        id, businessId, invoiceNumber, customerId, customerName, customerGSTIN,
+                        totalAmount, taxAmount, createdAt, updatedAt, irn, ackNo, ackDate, qrCodeData
+                    FROM invoices
+                    """
+                )
                 db.execSQL("DROP TABLE invoices")
                 db.execSQL("ALTER TABLE invoices_new RENAME TO invoices")
                 db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_invoices_businessId_invoiceNumber` ON `invoices` (`businessId`, `invoiceNumber`)")

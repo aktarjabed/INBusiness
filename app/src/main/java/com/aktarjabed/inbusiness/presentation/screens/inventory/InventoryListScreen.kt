@@ -11,11 +11,13 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aktarjabed.inbusiness.data.entities.Product
 import com.aktarjabed.inbusiness.presentation.viewmodel.ProductViewModel
 
@@ -27,10 +29,10 @@ fun InventoryListScreen(
     onNavigateToEditProduct: (Long) -> Unit,
     viewModel: ProductViewModel = hiltViewModel()
 ) {
-    val products by viewModel.products.collectAsState()
-    val categories by viewModel.existingCategories.collectAsState()
+    val products by viewModel.products.collectAsStateWithLifecycle()
+    val categories by viewModel.existingCategories.collectAsStateWithLifecycle()
 
-    var searchQuery by remember { mutableStateOf("") }
+    var searchQuery by rememberSaveable { mutableStateOf("") }
     var selectedCategory by remember { mutableStateOf<String?>(null) }
 
     Scaffold(
