@@ -7,6 +7,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -37,11 +38,13 @@ fun InvoicePreviewScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val recordPaymentState by viewModel.recordPaymentState.collectAsState()
+    val cancelInvoiceState by viewModel.cancelInvoiceState.collectAsState()
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
 
     var showPaymentDialog by remember { mutableStateOf(false) }
+    var showCancelConfirmDialog by remember { mutableStateOf(false) }
     var paymentAmountText by remember { mutableStateOf("") }
     var paymentMode by remember { mutableStateOf("CASH") }
     var paymentModeMenuExpanded by remember { mutableStateOf(false) }
@@ -56,16 +59,51 @@ fun InvoicePreviewScreen(
         }
     }
 
+    LaunchedEffect(cancelInvoiceState) {
+        when (val state = cancelInvoiceState) {
+            is CancelInvoiceUiState.Cancelled -> {
+                showCancelConfirmDialog = false
+                snackbarHostState.showSnackbar("Invoice cancelled. Stock has been returned to inventory.")
+                viewModel.resetCancelInvoiceState()
+            }
+            is CancelInvoiceUiState.Error -> {
+                // The dialog stays open so the user can retry or back out; the reason is
+                // surfaced in the snackbar (same channel as payment errors).
+                snackbarHostState.showSnackbar(state.message)
+                viewModel.resetCancelInvoiceState()
+            }
+            else -> Unit
+        }
+    }
+
     val parsedPaymentAmount = paymentAmountText.toDoubleOrNull()
     val paymentInputValid = parsedPaymentAmount != null && parsedPaymentAmount.isFinite() && parsedPaymentAmount > 0.0
 
     Scaffold(
         topBar = {
+            val cancellableInvoice = (uiState as? InvoicePreviewUiState.Success)?.invoice
+            val canCancel = cancellableInvoice != null &&
+                cancellableInvoice.status == "COMPLETED" &&
+                cancellableInvoice.amountPaid <= 0.0
+
             TopAppBar(
                 title = { Text("Invoice Preview") },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                actions = {
+                    // Cancellation reverses the stock ledger, so it is only offered while the
+                    // invoice has no recorded payments (the repository enforces the same rule).
+                    if (canCancel) {
+                        IconButton(onClick = { showCancelConfirmDialog = true }) {
+                            Icon(
+                                Icons.Default.Delete,
+                                contentDescription = "Cancel invoice",
+                                tint = MaterialTheme.colorScheme.error
+                            )
+                        }
                     }
                 }
             )
@@ -237,6 +275,57 @@ fun InvoicePreviewScreen(
                     }
                 ) {
                     Text("Cancel")
+                }
+            }
+        )
+    }
+
+    if (showCancelConfirmDialog) {
+        val cancelling = cancelInvoiceState is CancelInvoiceUiState.Cancelling
+        AlertDialog(
+            onDismissRequest = {
+                if (!cancelling) {
+                    showCancelConfirmDialog = false
+                    viewModel.resetCancelInvoiceState()
+                }
+            },
+            title = { Text("Cancel this invoice?") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        "The invoice will be marked CANCELLED and its stock will be returned " +
+                            "to inventory. This cannot be undone."
+                    )
+                    Text(
+                        "Invoices with recorded payments cannot be cancelled. Refund or " +
+                            "reconcile the payments first.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (cancelling) {
+                        Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator()
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !cancelling,
+                    onClick = { viewModel.cancelInvoice() }
+                ) {
+                    Text("Cancel invoice", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    enabled = !cancelling,
+                    onClick = {
+                        showCancelConfirmDialog = false
+                        viewModel.resetCancelInvoiceState()
+                    }
+                ) {
+                    Text("Keep invoice")
                 }
             }
         )

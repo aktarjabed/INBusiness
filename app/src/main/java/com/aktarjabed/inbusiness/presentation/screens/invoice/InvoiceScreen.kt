@@ -25,7 +25,6 @@ import kotlinx.coroutines.delay
 @Composable
 fun InvoiceScreen(
     onNavigateBack: () -> Unit,
-    onNavigateToUpgrade: () -> Unit,
     onNavigateToPreview: (String) -> Unit,
     viewModel: InvoiceViewModel = hiltViewModel()
 ) {
@@ -44,6 +43,7 @@ fun InvoiceScreen(
     val errorMessage by viewModel.errorMessage.collectAsState()
 
     var showAddItemDialog by remember { mutableStateOf(false) }
+    var showUpgradeInfoDialog by remember { mutableStateOf(false) }
     var editingItemInput by remember { mutableStateOf<InvoiceItemInput?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -110,7 +110,7 @@ fun InvoiceScreen(
                         if (state.remainingToday <= 5) {
                             QuotaWarningBanner(
                                 remaining = state.remainingToday,
-                                onUpgrade = onNavigateToUpgrade
+                                onUpgrade = { showUpgradeInfoDialog = true }
                             )
                             Spacer(modifier = Modifier.height(8.dp))
                         }
@@ -295,11 +295,17 @@ fun InvoiceScreen(
                 }
 
                 is InvoiceUiState.QuotaBlocked -> {
-                    QuotaBlockedDialog(
-                        verdict = state.verdict,
-                        onUpgrade = onNavigateToUpgrade,
-                        onDismiss = onNavigateBack
-                    )
+                    if (showUpgradeInfoDialog) {
+                        // Replace (not stack on top of) the blocked dialog while the plan
+                        // information is on screen.
+                        UpgradeInfoDialog(onDismiss = { showUpgradeInfoDialog = false })
+                    } else {
+                        QuotaBlockedDialog(
+                            verdict = state.verdict,
+                            onUpgrade = { showUpgradeInfoDialog = true },
+                            onDismiss = onNavigateBack
+                        )
+                    }
                 }
 
                 is InvoiceUiState.Success -> {
@@ -352,6 +358,44 @@ fun InvoiceScreen(
             }
         )
     }
+
+    // The quota-blocked branch renders the same dialog itself (replacing the blocked dialog
+    // instead of stacking on top of it), so it is only shown here for the remaining states.
+    if (showUpgradeInfoDialog && uiState !is InvoiceUiState.QuotaBlocked) {
+        UpgradeInfoDialog(onDismiss = { showUpgradeInfoDialog = false })
+    }
+}
+
+/**
+ * Explains the free-plan limits and the fact that no purchase can be completed in this
+ * build. Previously the "Upgrade" entry points were no-ops, which reads as a broken button.
+ */
+@Composable
+private fun UpgradeInfoDialog(onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Free plan limits") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    "The free plan allows 2 invoices per day (plus a launch bonus while it " +
+                        "lasts) and 60 per month. Daily and monthly allowances reset " +
+                        "automatically, so invoicing resumes on its own."
+                )
+                Text(
+                    "In-app purchases are not enabled in this build, so no upgrade can be " +
+                        "bought from the app yet.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("OK")
+            }
+        }
+    )
 }
 
 @Composable

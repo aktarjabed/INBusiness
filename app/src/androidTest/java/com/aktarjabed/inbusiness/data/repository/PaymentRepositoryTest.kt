@@ -7,7 +7,9 @@ import com.aktarjabed.inbusiness.data.dao.InvoiceDao
 import com.aktarjabed.inbusiness.data.dao.PaymentDao
 import com.aktarjabed.inbusiness.data.database.AppDatabase
 import com.aktarjabed.inbusiness.data.entities.Invoice
+import com.aktarjabed.inbusiness.data.entities.InvoiceItem
 import com.aktarjabed.inbusiness.data.entities.Payment
+import com.aktarjabed.inbusiness.data.entities.Product
 import com.aktarjabed.inbusiness.domain.context.BusinessContext
 import com.aktarjabed.inbusiness.domain.invoice.CalculateInvoiceTotalsUseCase
 import com.aktarjabed.inbusiness.domain.invoice.InvoiceCreationResult
@@ -214,6 +216,63 @@ class PaymentRepositoryTest {
         assertTrue(result is InvoiceCreationResult.InvalidRequest)
         assertEquals("COMPLETED", invoiceDao.getInvoiceById(INVOICE_ID, BUSINESS_ID)!!.status)
         assertEquals(90.0, invoiceDao.getInvoiceById(INVOICE_ID, BUSINESS_ID)!!.balanceDue, 0.001)
+    }
+
+    /**
+     * Cancellation is reachable from the invoice preview screen, so the repository path that
+     * screen calls must reverse the stock ledger exactly once and then refuse a repeat.
+     */
+    @Test
+    fun cancellingAnInvoiceReversesStockExactlyOnce() = runBlocking {
+        val productId = database.productDao().insertProduct(
+            Product(
+                businessId = BUSINESS_ID,
+                name = "Urea 50kg",
+                brand = "J.A.",
+                category = "Fertilizer",
+                unitType = "BAG",
+                pricePerUnit = 100.0,
+                availableStock = 10.0,
+                batchNumber = "B-1",
+                isWholesaleOnly = false
+            )
+        )
+        // Simulate the sale the invoice recorded, then attach the line item to that invoice.
+        database.productDao().deductStock(productId, BUSINESS_ID, 4.0)
+        invoiceDao.insertItem(
+            InvoiceItem(
+                id = "item-cancel-1",
+                invoiceId = INVOICE_ID,
+                description = "Urea 50kg",
+                quantity = 4.0,
+                pricePerUnit = 100.0,
+                unitType = "BAG",
+                subTotal = 400.0,
+                gstPercentage = 0.0,
+                taxAmount = 0.0,
+                totalAmount = 400.0,
+                productId = productId
+            )
+        )
+
+        val first = invoiceRepository.cancelInvoice(INVOICE_ID)
+        assertTrue("First cancellation should succeed but was $first", first is InvoiceCreationResult.Success)
+        assertEquals("CANCELLED", invoiceDao.getInvoiceById(INVOICE_ID, BUSINESS_ID)!!.status)
+        assertEquals(10.0, database.productDao().getProductById(productId, BUSINESS_ID)!!.availableStock, 0.001)
+
+        val movements = database.stockMovementDao()
+            .getMovementsByReference(BUSINESS_ID, "INVOICE", INVOICE_ID)
+        assertEquals(1, movements.size)
+        assertEquals("SALE_REVERSAL", movements[0].movementType)
+        assertEquals(4.0, movements[0].quantity, 0.001)
+
+        val second = invoiceRepository.cancelInvoice(INVOICE_ID)
+        assertTrue("A cancelled invoice cannot be cancelled twice", second is InvoiceCreationResult.InvalidRequest)
+        assertEquals(10.0, database.productDao().getProductById(productId, BUSINESS_ID)!!.availableStock, 0.001)
+        assertEquals(
+            1,
+            database.stockMovementDao().getMovementsByReference(BUSINESS_ID, "INVOICE", INVOICE_ID).size
+        )
     }
 
     /**

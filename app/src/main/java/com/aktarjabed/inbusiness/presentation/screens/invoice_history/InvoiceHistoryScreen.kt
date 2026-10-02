@@ -19,7 +19,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.aktarjabed.inbusiness.data.entities.Invoice
-import java.time.ZoneId
+import com.aktarjabed.inbusiness.utils.AppDateUtils
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
@@ -33,6 +33,10 @@ fun InvoiceHistoryScreen(
     val uiState by viewModel.uiState.collectAsState()
     val listState = rememberLazyListState()
     var showFilters by remember { mutableStateOf(false) }
+
+    // Re-read the first page whenever the screen is (re)entered: returning from the preview
+    // after cancelling an invoice must not leave the old status on screen.
+    LaunchedEffect(Unit) { viewModel.loadInvoices(reset = true) }
 
     // Load more when scrolling near the end
     LaunchedEffect(listState.layoutInfo) {
@@ -81,8 +85,10 @@ fun InvoiceHistoryScreen(
             if (showFilters) {
                 FilterPanel(
                     currentStatus = uiState.status,
+                    currentPaymentStatus = uiState.paymentStatus,
                     currentDocType = uiState.documentType,
                     onStatusChanged = { viewModel.onStatusChanged(it) },
+                    onPaymentStatusChanged = { viewModel.onPaymentStatusChanged(it) },
                     onDocTypeChanged = { viewModel.onDocumentTypeChanged(it) }
                 )
             }
@@ -187,8 +193,10 @@ fun InvoiceHistoryScreen(
 @Composable
 private fun FilterPanel(
     currentStatus: String?,
+    currentPaymentStatus: String?,
     currentDocType: String?,
     onStatusChanged: (String?) -> Unit,
+    onPaymentStatusChanged: (String?) -> Unit,
     onDocTypeChanged: (String?) -> Unit
 ) {
     Card(
@@ -218,6 +226,34 @@ private fun FilterPanel(
                     selected = currentStatus == "CANCELLED",
                     onClick = { onStatusChanged("CANCELLED") },
                     label = { Text("Cancelled") }
+                )
+            }
+
+            Spacer(Modifier.height(12.dp))
+            HorizontalDivider()
+            Spacer(Modifier.height(12.dp))
+
+            Text(
+                "Payment",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = currentPaymentStatus == null,
+                    onClick = { onPaymentStatusChanged(null) },
+                    label = { Text("All") }
+                )
+                FilterChip(
+                    selected = currentPaymentStatus == "PAID",
+                    onClick = { onPaymentStatusChanged("PAID") },
+                    label = { Text("Paid") }
+                )
+                FilterChip(
+                    selected = currentPaymentStatus == "UNPAID",
+                    onClick = { onPaymentStatusChanged("UNPAID") },
+                    label = { Text("Unpaid") }
                 )
             }
 
@@ -257,8 +293,10 @@ private fun InvoiceHistoryCard(
     invoice: Invoice,
     onClick: () -> Unit
 ) {
+    // Ledger timestamps are displayed in the authoritative business timezone, matching the
+    // PDF, the preview and the dashboard's day windows.
     val dateFormatter = remember {
-        DateTimeFormatter.ofPattern("dd MMM yyyy, HH:mm").withZone(ZoneId.systemDefault())
+        DateTimeFormatter.ofPattern("dd MMM yyyy, HH:mm").withZone(AppDateUtils.businessZoneId)
     }
 
     Card(

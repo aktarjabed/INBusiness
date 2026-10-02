@@ -7,7 +7,9 @@ import androidx.lifecycle.viewModelScope
 import com.aktarjabed.inbusiness.data.entities.Invoice
 import com.aktarjabed.inbusiness.data.entities.InvoiceItem
 import com.aktarjabed.inbusiness.data.entities.Payment
+import com.aktarjabed.inbusiness.data.repository.InvoiceRepository
 import com.aktarjabed.inbusiness.data.repository.PaymentRepository
+import com.aktarjabed.inbusiness.domain.invoice.InvoiceCreationResult
 import com.aktarjabed.inbusiness.domain.usecase.GetInvoiceForPreviewUseCase
 import com.aktarjabed.inbusiness.domain.usecase.PreviewResult
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -30,10 +32,18 @@ sealed class RecordPaymentUiState {
     data class Error(val message: String) : RecordPaymentUiState()
 }
 
+sealed class CancelInvoiceUiState {
+    object Idle : CancelInvoiceUiState()
+    object Cancelling : CancelInvoiceUiState()
+    object Cancelled : CancelInvoiceUiState()
+    data class Error(val message: String) : CancelInvoiceUiState()
+}
+
 @HiltViewModel
 class InvoicePreviewViewModel @Inject constructor(
     private val getInvoiceForPreviewUseCase: GetInvoiceForPreviewUseCase,
     private val paymentRepository: PaymentRepository,
+    private val invoiceRepository: InvoiceRepository,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
@@ -45,12 +55,18 @@ class InvoicePreviewViewModel @Inject constructor(
     private val _recordPaymentState = MutableStateFlow<RecordPaymentUiState>(RecordPaymentUiState.Idle)
     val recordPaymentState: StateFlow<RecordPaymentUiState> = _recordPaymentState.asStateFlow()
 
+    private val _cancelInvoiceState = MutableStateFlow<CancelInvoiceUiState>(CancelInvoiceUiState.Idle)
+    val cancelInvoiceState: StateFlow<CancelInvoiceUiState> = _cancelInvoiceState.asStateFlow()
+
     /**
      * Payments are not keyed by an idempotency token, so a double tap must not be able to
      * post the same amount twice. The dialog disables its button, but the state update is
      * asynchronous, hence this guard.
      */
     private var paymentInFlight = false
+
+    /** Same reasoning as [paymentInFlight]: cancellation must run exactly once. */
+    private var cancelInFlight = false
 
     init {
         viewModelScope.launch { loadInvoice() }
@@ -111,5 +127,47 @@ class InvoicePreviewViewModel @Inject constructor(
 
     fun resetRecordPaymentState() {
         _recordPaymentState.value = RecordPaymentUiState.Idle
+    }
+
+    /**
+     * Cancels the invoice through [InvoiceRepository.cancelInvoice], which reverses the
+     * stock ledger exactly once and refuses to run while payments exist. The repository
+     * owns all the invariants; this method only translates the result into UI state.
+     */
+    fun cancelInvoice() {
+        if (cancelInFlight) return
+        cancelInFlight = true
+
+        viewModelScope.launch {
+            _cancelInvoiceState.value = CancelInvoiceUiState.Cancelling
+            try {
+                when (val result = invoiceRepository.cancelInvoice(invoiceId)) {
+                    is InvoiceCreationResult.Success -> {
+                        loadInvoice()
+                        _cancelInvoiceState.value = CancelInvoiceUiState.Cancelled
+                    }
+                    is InvoiceCreationResult.InvalidRequest -> {
+                        _cancelInvoiceState.value = CancelInvoiceUiState.Error(result.message)
+                    }
+                    else -> {
+                        _cancelInvoiceState.value = CancelInvoiceUiState.Error(
+                            "This invoice could not be cancelled. Reload the invoice and try again."
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                Log.e("InvoicePreviewViewModel", "Failed to cancel invoice", e)
+                _cancelInvoiceState.value = CancelInvoiceUiState.Error(
+                    e.message ?: "Could not cancel the invoice"
+                )
+            } finally {
+                cancelInFlight = false
+            }
+        }
+    }
+
+    fun resetCancelInvoiceState() {
+        _cancelInvoiceState.value = CancelInvoiceUiState.Idle
     }
 }
