@@ -90,16 +90,23 @@ existing installs.
     crash on read (and old rows cannot be fixed by validation on the write path). Validate in the
     repository, where `PaymentRepository.addPayment`, `ProductRepository.saveProduct` and
     `StockMovementRepository.addMovement` already do.
-14. **`StockMovementRepository.addMovement` deliberately does not enforce a sign-per-type table.**
+14. **Every new invoice-draft field must be added to `InvoiceViewModel.persistDraft()`.** The
+    draft is restored in the constructor and mirrored on every mutation; a field that is only
+    added to the state initialiser will look fine in-session and vanish on process death. Draft
+    items go through `InvoiceDraftCodec`, which is length-prefixed so user text containing `;`
+    or `:` cannot corrupt it — keep that property if you touch the format, and bump `VERSION`
+    (older drafts are then dropped rather than misread).
+15. **`StockMovementRepository.addMovement` deliberately does not enforce a sign-per-type table.**
     `STOCK_ADJUSTMENT` is legitimately positive or negative, so a fixed rule would reject valid
     adjustments. Type-independent invariants (finite, non-zero, non-blank type/reference) are
     enforced; the sign is set by the call site that knows the movement type.
 
 ## Known real gaps (verified, not yet fixed)
 
-- `InvoiceViewModel` keeps the in-progress invoice in plain `MutableStateFlow`s with no
-  `SavedStateHandle`, so process death in the background loses a half-composed invoice. The
-  screen-level `rememberSaveable` conversions cover product/setup/search forms only.
+- Not persisted on purpose: seller fields (re-read from the business profile on load),
+  `editingItemIndex` and dialog visibility. Everything else in the invoice draft — customer
+  fields, supply type, items, amount paid, payment method and the pending idempotency key —
+  survives process death via `SavedStateHandle` + `InvoiceDraftCodec`.
 - `app/schemas/.../{14,15,16,17}.json` are missing, so `MigrationTestHelper.createDatabase(name,
   14..17)` cannot open those versions. Tests currently start at 13 (which has a schema) and 18.
   Per-step validation of 14→18 therefore isn't possible until those snapshots are regenerated
@@ -118,9 +125,11 @@ existing installs.
   network access. FileProvider (`${applicationId}.fileprovider` -> `cache-path invoices/`) lines up
   with `PdfGenerator` (`cacheDir/invoices`) and the share intent sets
   `FLAG_GRANT_READ_URI_PERMISSION` — verified, do not "simplify" any of the three.
-- Two catch blocks (the `SQLiteConstraintException` idempotency fallback in `createInvoice`, and
-  `cancelInvoice`'s generic handler) would also catch a `CancellationException`; the inner guard
-  usually throws first, but the handlers are not airtight.
+- *(Correction, previously listed here as a gap and verified to be false.)* Cancellation
+  propagation in `InvoiceRepository` is correct: the `SQLiteConstraintException` idempotency
+  fallback cannot receive a `CancellationException` (that is a different type, so the handler is
+  unreachable for it), and `cancelInvoice`'s generic handler rethrows it explicitly. Leave both
+  handlers as they are; do not "fix" them.
 
 ## Working agreements
 
