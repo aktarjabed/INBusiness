@@ -63,14 +63,22 @@ class CalculatorViewModel @Inject constructor(
     fun saveScenario(name: String) {
         viewModelScope.launch {
             _isLoading.value = true
-            runCatching {
+            try {
                 val data = _businessData.value.copy(
                     id = UUID.randomUUID().toString(),
                     scenarioName = name.ifBlank { "Scenario ${System.currentTimeMillis()}" }
                 )
-                repo.saveBusinessData(data)
+                // BusinessRepository reports failures as Result.failure instead of throwing,
+                // so they must be inspected: otherwise a failed save closed the dialog and
+                // looked successful while nothing was written.
+                val saveResult = repo.saveBusinessData(data)
+                if (saveResult.isFailure) {
+                    _errorMsg.tryEmit("Failed to save: ${describe(saveResult.exceptionOrNull())}")
+                    return@launch
+                }
+
                 val metrics = _financialMetrics.value
-                repo.saveCalculationResult(
+                val metricsResult = repo.saveCalculationResult(
                     CalculationResult(
                         id = UUID.randomUUID().toString(),
                         businessDataId = data.id,
@@ -86,11 +94,21 @@ class CalculatorViewModel @Inject constructor(
                         roi = metrics.roi
                     )
                 )
-                loadSavedScenarios()
-            }.onFailure {
-                _errorMsg.tryEmit("Failed to save: ${it.localizedMessage}")
+                if (metricsResult.isFailure) {
+                    _errorMsg.tryEmit(
+                        "Scenario saved, but its metrics could not be stored: " +
+                            describe(metricsResult.exceptionOrNull())
+                    )
+                }
+                // No manual reload: `savedScenarios` is collected from the Room flow in
+                // [loadSavedScenarios], which re-emits on every write. Calling it again here
+                // used to leak another permanent collector per save.
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                _errorMsg.tryEmit("Failed to save: ${describe(e)}")
+            } finally {
+                _isLoading.value = false
             }
-            _isLoading.value = false
         }
     }
 
@@ -101,21 +119,31 @@ class CalculatorViewModel @Inject constructor(
 
     fun deleteScenario(data: BusinessData) {
         viewModelScope.launch {
-            runCatching {
+            try {
                 val activeBusinessId = businessContext.activeBusinessId.first()
                 if (data.id == activeBusinessId) {
                     // Never allow the live business profile to be deleted from the calculator.
                     _errorMsg.tryEmit("The active business cannot be deleted from the calculator")
-                    return@runCatching
+                    return@launch
                 }
-                repo.deleteBusinessData(data)
+                val deleteResult = repo.deleteBusinessData(data)
+                if (deleteResult.isFailure) {
+                    // e.g. a RESTRICT foreign key still references this row. Without this check
+                    // the failure was invisible and the scenario silently stayed in the list.
+                    _errorMsg.tryEmit("Delete failed: ${describe(deleteResult.exceptionOrNull())}")
+                    return@launch
+                }
                 repo.deleteAllCalculationResults(data.id)
-                loadSavedScenarios()
-            }.onFailure {
-                _errorMsg.tryEmit("Delete failed: ${it.localizedMessage}")
+                // The live Room flow re-emits; see the note in [saveScenario].
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                _errorMsg.tryEmit("Delete failed: ${describe(e)}")
             }
         }
     }
+
+    private fun describe(throwable: Throwable?): String =
+        throwable?.localizedMessage?.takeIf { it.isNotBlank() } ?: throwable?.javaClass?.simpleName ?: "unknown error"
 
     private fun loadSavedScenarios() {
         viewModelScope.launch {

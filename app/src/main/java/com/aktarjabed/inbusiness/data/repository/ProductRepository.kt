@@ -80,11 +80,51 @@ class ProductRepository @Inject constructor(
         val trimmedUnitType = unitType.trim()
         val trimmedBatchNumber = batchNumber?.trim()?.takeIf { it.isNotBlank() } ?: ""
 
-        return database.withTransaction {
-            if (id == 0L) {
-                val productId = productDao.insertProduct(
-                    Product(
-                        id = 0L,
+        // The product table has a unique index over
+        // (businessId, name, brand, category, unitType, batchNumber). SQLite reports a
+        // violation with the raw constraint text ("UNIQUE constraint failed: products..."),
+        // which is useless in the UI, so translate it into an actionable message.
+        return try {
+            database.withTransaction {
+                if (id == 0L) {
+                    val productId = productDao.insertProduct(
+                        Product(
+                            id = 0L,
+                            businessId = businessId,
+                            name = trimmedName,
+                            brand = trimmedBrand,
+                            category = trimmedCategory,
+                            unitType = trimmedUnitType,
+                            pricePerUnit = pricePerUnit,
+                            availableStock = availableStock,
+                            batchNumber = trimmedBatchNumber,
+                            isWholesaleOnly = isWholesaleOnly,
+                            gstPercentage = gstPercentage,
+                            reorderThreshold = reorderThreshold
+                        )
+                    )
+                    if (availableStock > 0.0) {
+                        stockMovementDao.insertMovement(
+                            StockMovement(
+                                businessId = businessId,
+                                productId = productId,
+                                movementType = "OPENING_STOCK",
+                                quantity = availableStock,
+                                stockBefore = 0.0,
+                                stockAfter = availableStock,
+                                referenceType = "PRODUCT",
+                                referenceId = productId.toString(),
+                                reason = "Opening stock"
+                            )
+                        )
+                    }
+                    productId
+                } else {
+                    val existingProduct = productDao.getProductById(id, businessId)
+                        ?: throw IllegalStateException("Product does not exist or belongs to another business.")
+
+                    val rowsAffected = productDao.updateProduct(
+                        id = id,
                         businessId = businessId,
                         name = trimmedName,
                         brand = trimmedBrand,
@@ -97,63 +137,35 @@ class ProductRepository @Inject constructor(
                         gstPercentage = gstPercentage,
                         reorderThreshold = reorderThreshold
                     )
-                )
-                if (availableStock > 0.0) {
-                    stockMovementDao.insertMovement(
-                        StockMovement(
-                            businessId = businessId,
-                            productId = productId,
-                            movementType = "OPENING_STOCK",
-                            quantity = availableStock,
-                            stockBefore = 0.0,
-                            stockAfter = availableStock,
-                            referenceType = "PRODUCT",
-                            referenceId = productId.toString(),
-                            reason = "Opening stock"
-                        )
-                    )
-                }
-                productId
-            } else {
-                val existingProduct = productDao.getProductById(id, businessId)
-                    ?: throw IllegalStateException("Product does not exist or belongs to another business.")
+                    if (rowsAffected == 0) {
+                        throw IllegalStateException("Failed to update product. It may not exist or belongs to another business.")
+                    }
 
-                val rowsAffected = productDao.updateProduct(
-                    id = id,
-                    businessId = businessId,
-                    name = trimmedName,
-                    brand = trimmedBrand,
-                    category = trimmedCategory,
-                    unitType = trimmedUnitType,
-                    pricePerUnit = pricePerUnit,
-                    availableStock = availableStock,
-                    batchNumber = trimmedBatchNumber,
-                    isWholesaleOnly = isWholesaleOnly,
-                    gstPercentage = gstPercentage,
-                    reorderThreshold = reorderThreshold
-                )
-                if (rowsAffected == 0) {
-                    throw IllegalStateException("Failed to update product. It may not exist or belongs to another business.")
-                }
-
-                val stockDelta = availableStock - existingProduct.availableStock
-                if (stockDelta != 0.0) {
-                    stockMovementDao.insertMovement(
-                        StockMovement(
-                            businessId = businessId,
-                            productId = id,
-                            movementType = "STOCK_ADJUSTMENT",
-                            quantity = stockDelta,
-                            stockBefore = existingProduct.availableStock,
-                            stockAfter = availableStock,
-                            referenceType = "PRODUCT",
-                            referenceId = id.toString(),
-                            reason = "Stock adjusted through product edit"
+                    val stockDelta = availableStock - existingProduct.availableStock
+                    if (stockDelta != 0.0) {
+                        stockMovementDao.insertMovement(
+                            StockMovement(
+                                businessId = businessId,
+                                productId = id,
+                                movementType = "STOCK_ADJUSTMENT",
+                                quantity = stockDelta,
+                                stockBefore = existingProduct.availableStock,
+                                stockAfter = availableStock,
+                                referenceType = "PRODUCT",
+                                referenceId = id.toString(),
+                                reason = "Stock adjusted through product edit"
+                            )
                         )
-                    )
+                    }
+                    id
                 }
-                id
             }
+        } catch (e: android.database.sqlite.SQLiteConstraintException) {
+            throw IllegalStateException(
+                "A product with the same name, brand, category, unit type and batch number " +
+                    "already exists. Change one of those fields (or the batch number) and save again.",
+                e
+            )
         }
     }
 

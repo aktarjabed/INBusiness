@@ -42,7 +42,12 @@ jobs:
       run: chmod +x gradlew
 
     - name: Build with Gradle
-      run: ./gradlew assembleDebug --stacktrace --console=plain 2>&1 | tee gradle-build.log
+      shell: bash
+      # pipefail is required: without it the pipeline reports tee's exit status, so a
+      # failing Gradle build would still be reported as a success by this step.
+      run: |
+        set -o pipefail
+        ./gradlew assembleDebug --stacktrace --console=plain 2>&1 | tee gradle-build.log
 
     - name: Report Gradle failure details
       if: failure()
@@ -107,7 +112,11 @@ jobs:
       # --no-build-cache forces real execution: a task served entirely from the build
       # cache writes no JUnit XML, so the verification step below could not tell the
       # difference between "tests passed" and "tests never ran".
-      run: ./gradlew testDebugUnitTest --no-build-cache --stacktrace --console=plain 2>&1 | tee unit-test.log
+      # pipefail makes a non-zero Gradle exit fail this step instead of being masked by tee.
+      shell: bash
+      run: |
+        set -o pipefail
+        ./gradlew testDebugUnitTest --no-build-cache --stacktrace --console=plain 2>&1 | tee unit-test.log
 
     # A green test step is worthless if the task was skipped or discovered no tests.
     # This gate asserts the JUnit XML exists, that the security/regression suites really
@@ -200,7 +209,12 @@ jobs:
         fi
 
     - name: Run Android Lint
-      run: ./gradlew lintDebug --no-build-cache --stacktrace --console=plain 2>&1 | tee lint.log
+      # lintDebug aborts on error-severity findings, but only a non-zero exit can carry
+      # that signal, so pipefail is what actually makes lint a gate here.
+      shell: bash
+      run: |
+        set -o pipefail
+        ./gradlew lintDebug --no-build-cache --stacktrace --console=plain 2>&1 | tee lint.log
 
     - name: Verify lint report was produced
       shell: bash
@@ -323,7 +337,13 @@ jobs:
         target: google_apis
         emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
         disable-animations: true
-        script: ./gradlew connectedDebugAndroidTest --no-build-cache --stacktrace --console=plain 2>&1 | tee instrumentation.log
+        # No pipe: `tee` would make the pipeline report success even when Gradle fails.
+        # The log is still written (and echoed) so the diagnostics step below can read it.
+        script: |
+          ./gradlew connectedDebugAndroidTest --no-build-cache --stacktrace --console=plain > instrumentation.log 2>&1
+          status=$?
+          cat instrumentation.log
+          exit $status
 
     - name: Verify instrumented tests actually executed
       shell: bash

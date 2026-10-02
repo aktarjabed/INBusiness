@@ -57,7 +57,6 @@ fun InBusinessNavGraph() {
         composable(NavigationRoutes.INVOICE) {
             InvoiceScreen(
                 onNavigateBack = { navController.popBackStack() },
-                onNavigateToUpgrade = { /* TODO: Navigate to upgrade screen */ },
                 onNavigateToPreview = { invoiceId ->
                     navController.popBackStack()
                     navController.navigate(NavigationRoutes.invoicePreview(invoiceId))

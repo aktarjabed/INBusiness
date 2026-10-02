@@ -36,6 +36,11 @@ fun DashboardScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
 
+    // The metric cards are live SQL flows, but the seven-day chart is loaded imperatively.
+    // Re-run the load whenever the screen is (re)entered so an invoice created in another
+    // screen is reflected on return instead of leaving a stale chart behind.
+    LaunchedEffect(Unit) { viewModel.refreshData() }
+
     // Build Vico chart model from chart data
     val chartModelProducer = remember { CartesianChartModelProducer() }
     LaunchedEffect(state.chartData) {
