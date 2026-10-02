@@ -1,6 +1,6 @@
 package com.aktarjabed.inbusiness.domain.invoice
 
-import com.aktarjabed.inbusiness.data.entities.InvoiceItem
+import com.aktarjabed.inbusiness.data.dao.InvoiceItemSuggestion
 
 /**
  * Identity of a line for "what did this product last sell for" purposes.
@@ -10,7 +10,7 @@ import com.aktarjabed.inbusiness.data.entities.InvoiceItem
  * namespaces are prefixed so a description that happens to look like an id ("5") can never
  * collide with product 5.
  */
-fun InvoiceItem.historyKey(): String =
+fun InvoiceItemSuggestion.historyKey(): String =
     productId?.let { "id:$it" } ?: "desc:${description.trim().lowercase()}"
 
 /**
@@ -20,5 +20,5 @@ fun InvoiceItem.historyKey(): String =
  * the first occurrence of a key wins, which is what makes this equivalent to the previous
  * "latest id per product" SQL subquery.
  */
-fun List<InvoiceItem>.collapseHistoryToLatest(): List<InvoiceItem> =
+fun List<InvoiceItemSuggestion>.collapseHistoryToLatest(): List<InvoiceItemSuggestion> =
     distinctBy { it.historyKey() }

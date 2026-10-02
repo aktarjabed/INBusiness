@@ -7,6 +7,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.aktarjabed.inbusiness.data.dao.InvoiceDao
 import com.aktarjabed.inbusiness.data.entities.Invoice
 import com.aktarjabed.inbusiness.data.entities.InvoiceItem
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.*
@@ -89,5 +90,42 @@ class InvoiceDaoIsolationTest {
 
         val invoicesBiz2 = invoiceDao.getAllInvoicesOnce(biz2)
         assertEquals(1, invoicesBiz2.size)
+    }
+
+    @Test
+    fun historicalSuggestionQueryProjectsOnlySuggestionFieldsAndIsBusinessScoped() = runBlocking {
+        val invoice = Invoice(
+            id = "suggestion-invoice",
+            businessId = "suggestion-business",
+            invoiceNumber = "INV-1",
+            customerName = "Buyer",
+            createdAt = Instant.ofEpochMilli(10),
+            updatedAt = Instant.ofEpochMilli(10)
+        )
+        invoiceDao.insertInvoice(invoice)
+        invoiceDao.insertItem(
+            InvoiceItem(
+                id = "suggestion-item",
+                invoiceId = invoice.id,
+                description = "Urea",
+                quantity = 4.0,
+                pricePerUnit = 25.0,
+                unitType = "BAG",
+                subTotal = 100.0,
+                gstPercentage = 5.0,
+                taxAmount = 5.0,
+                totalAmount = 105.0,
+                productId = 42L
+            )
+        )
+
+        val suggestions = invoiceDao.getHistoricalInvoiceItems("suggestion-business").first()
+        assertEquals(1, suggestions.size)
+        assertEquals("Urea", suggestions.single().description)
+        assertEquals(25.0, suggestions.single().pricePerUnit, 0.0)
+        assertEquals("BAG", suggestions.single().unitType)
+        assertEquals(42L, suggestions.single().productId)
+        assertEquals(5.0, suggestions.single().gstPercentage, 0.0)
+        assertTrue(invoiceDao.getHistoricalInvoiceItems("another-business").first().isEmpty())
     }
 }

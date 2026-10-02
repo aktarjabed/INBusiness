@@ -1,7 +1,7 @@
 package com.aktarjabed.inbusiness.domain.usecase
 
+import com.aktarjabed.inbusiness.data.dao.InvoiceItemSuggestion
 import com.aktarjabed.inbusiness.data.entities.Product
-import com.aktarjabed.inbusiness.data.entities.InvoiceItem
 import com.aktarjabed.inbusiness.data.repository.InvoiceRepository
 import com.aktarjabed.inbusiness.data.repository.ProductRepository
 import com.aktarjabed.inbusiness.domain.context.BusinessContext
@@ -30,8 +30,8 @@ class GetProductSuggestionsUseCase @Inject constructor(
         ) { products, historicalItems ->
                 val suggestions = mutableListOf<ProductSuggestion>()
 
-                val historyByProductId = mutableMapOf<Long, InvoiceItem>()
-                val historyByDescription = mutableMapOf<String, InvoiceItem>()
+                val historyByProductId = mutableMapOf<Long, InvoiceItemSuggestion>()
+                val historyByDescription = mutableMapOf<String, InvoiceItemSuggestion>()
 
                 for (item in historicalItems) {
                     if (item.productId != null) {

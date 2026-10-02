@@ -3,6 +3,7 @@ package com.aktarjabed.inbusiness.data.repository
 import android.util.Log
 import androidx.room.withTransaction
 import com.aktarjabed.inbusiness.data.dao.InvoiceDao
+import com.aktarjabed.inbusiness.data.dao.InvoiceItemSuggestion
 import com.aktarjabed.inbusiness.data.dao.ProductDao
 import com.aktarjabed.inbusiness.data.database.AppDatabase
 import com.aktarjabed.inbusiness.data.entities.Invoice
@@ -71,14 +72,13 @@ class InvoiceRepository @Inject constructor(
     }
 
     /**
-     * The latest line per product (or per free-text description for ad-hoc lines).
+     * The latest line per product (or per free-text description for ad-hoc lines), projected to
+     * only the fields required by invoice-item autocomplete.
      *
-     * The DAO returns the raw rows newest-first and the collapse happens here, so the query
-     * itself does not need the correlated "latest id per product" subquery that made it
-     * quadratic in the number of historical invoice lines. See
-     * [com.aktarjabed.inbusiness.data.dao.InvoiceDao.getHistoricalInvoiceItems].
+     * The DAO returns raw rows newest-first and the collapse happens here, avoiding the correlated
+     * "latest id per product" subquery that made the history query quadratic in its row count.
      */
-    fun getHistoricalInvoiceItems(): Flow<List<InvoiceItem>> {
+    fun getHistoricalInvoiceItems(): Flow<List<InvoiceItemSuggestion>> {
         return businessContext.activeBusinessId.flatMapLatest { businessId ->
             invoiceDao.getHistoricalInvoiceItems(businessId)
                 .map { items -> items.collapseHistoryToLatest() }
@@ -177,9 +177,6 @@ class InvoiceRepository @Inject constructor(
                 }
 
                 val invoiceId = UUID.randomUUID().toString()
-                // Timestamps are captured once so the invoice header, its payment entry and
-                // the stock movements cannot disagree by a few milliseconds.
-                val now = Instant.now()
 
                 // 3. Stock Deductions for linked products
                 // Iterating the *processed* items guarantees that only lines that passed
@@ -230,7 +227,17 @@ class InvoiceRepository @Inject constructor(
 
                 val nextInvoiceNumber = "INV-${String.format(java.util.Locale.US, "%05d", nextSeqNumber)}"
 
+                val updatedItems = calcResult.processedItems.map {
+                    it.copy(
+                        invoiceId = invoiceId,
+                        id = UUID.randomUUID().toString()
+                    )
+                }
 
+                // Capture the invoice timestamp after validation, quota consumption,
+                // stock updates, sequence allocation, and line preparation, immediately before
+                // persisting the header. Reuse it for the initial payment so those records align.
+                val now = Instant.now()
                 val invoice = Invoice(
                     id = invoiceId,
                     businessId = businessId,
@@ -257,13 +264,6 @@ class InvoiceRepository @Inject constructor(
                     createdAt = now,
                     updatedAt = now
                 )
-
-                val updatedItems = calcResult.processedItems.map {
-                    it.copy(
-                        invoiceId = invoiceId,
-                        id = UUID.randomUUID().toString()
-                    )
-                }
 
                 invoiceDao.insertInvoice(invoice)
                 updatedItems.forEach { invoiceDao.insertItem(it) }

@@ -25,26 +25,25 @@ interface InvoiceDao {
     suspend fun getInvoiceItems(invoiceId: String, businessId: String): List<InvoiceItem>
 
     /**
-     * Every invoice line for [businessId], newest invoice first, with the same total order
-     * ("invoice createdAt DESC, item id DESC") the previous implementation used.
+     * Lightweight projection of every invoice line for [businessId], newest invoice first, with
+     * the same total order ("invoice createdAt DESC, item id DESC") the previous implementation
+     * used.
      *
      * This deliberately returns *all* lines instead of filtering to one row per product in SQL.
      * The previous query used a correlated scalar subquery in the WHERE clause, which SQLite
-     * re-evaluates once per candidate row: on a real engine 1.5k lines took ~0.6 s and 20k lines
-     * took >100 s, so the invoice screen (product autocomplete) would jank or ANR on real data.
-     *
-     * Callers that need one line per product must collapse the list with
-     * `collapseHistoryToLatest()`; because the order above matches the old subquery exactly,
-     * "first row per key" selects the identical line the old query returned.
+     * re-evaluates once per candidate row and becomes prohibitively slow on real histories.
+     * Selecting only fields needed for autocomplete also avoids materializing full InvoiceItem
+     * entities and their unused totals/ids. Callers collapse the ordered projection to the latest
+     * row per key in memory; the first row per key is identical to the old query's result.
      */
     @Query("""
-        SELECT i.*
+        SELECT i.description, i.pricePerUnit, i.unitType, i.productId, i.gstPercentage
         FROM invoice_items i
         INNER JOIN invoices inv ON i.invoiceId = inv.id
         WHERE inv.businessId = :businessId
         ORDER BY inv.createdAt DESC, i.id DESC
     """)
-    fun getHistoricalInvoiceItems(businessId: String): Flow<List<InvoiceItem>>
+    fun getHistoricalInvoiceItems(businessId: String): Flow<List<InvoiceItemSuggestion>>
 
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertInvoice(invoice: Invoice)
