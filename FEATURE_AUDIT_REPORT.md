@@ -12,9 +12,24 @@ ViewModels and Compose screens), the 12 JVM test classes, the 10 instrumented te
 files and the CI workflow, followed by targeted fixes.
 
 **Limit:** this sandbox has no JDK, no Android SDK and no network access, so nothing
-could be compiled or executed here. Every statement below is derived from reading the
-code; the fixes applied are static-review-verified only and must be re-verified by CI
-(`.github/workflows/android.yml`) or a local build before release. Nothing was run.
+could be compiled or executed *in the sandbox*. Every finding below is derived from
+reading the code, and the fixes were pushed so that CI could compile and execute them —
+see *Verification evidence* at the end of this report. Only the CI run proves the changes
+build and pass.
+
+## Verification evidence
+
+Run [`36958995339`](https://github.com/aktarjabed/J.A.Agro_Inputs_And_Trading-/actions/runs/36958995339)
+on commit `f83fe6a`, all jobs green:
+
+| Job | Result | Evidence |
+|---|---|---|
+| Build, Lint & Unit Tests | **success** (3m18s) | `assembleDebug` compiles the modified screens/ViewModels; **71 cases in 12 classes, 0 failures, 0 errors, 0 skipped**; `lintDebug` passed (now a real gate via `pipefail`); the Room v19 regenerate-and-diff step passed. |
+| Instrumented Tests | **success** (4m54s) | **34 cases in 10 classes, 0 failures, 0 errors, 6 skipped** — one more case than before this branch, i.e. the new `cancellingAnInvoiceReversesStockExactlyOnce` ran and passed. |
+| Dependency Vulnerability Review | **success** | unchanged. |
+
+The 6 skips are the pre-existing, documented migration tests blocked by the upstream
+Room 2.8.5 ↔ `kotlinx-serialization` incompatibility (see *Carried over*, item 1).
 
 ## Findings and status
 
@@ -77,7 +92,7 @@ regressions. They need product decisions, not code:
 - Backup policy: `allowBackup=false` plus full-domain exclusions in both
   `backup_rules.xml` and `data_extraction_rules.xml`, asserted by `BackupPolicyTest`.
 
-## How to verify this pass
+## How to reproduce the verification
 
 ```bash
 # 1. Everything must compile and the JVM suites must stay green
