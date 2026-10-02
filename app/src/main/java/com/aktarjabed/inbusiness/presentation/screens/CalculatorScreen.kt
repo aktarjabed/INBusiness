@@ -10,6 +10,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aktarjabed.inbusiness.presentation.components.InputField
 import com.aktarjabed.inbusiness.presentation.components.MetricCard
 import com.aktarjabed.inbusiness.presentation.viewmodel.CalculatorViewModel
@@ -21,10 +22,10 @@ import java.math.BigDecimal
 fun CalculatorScreen(
     viewModel: CalculatorViewModel = hiltViewModel()
 ) {
-    val data by viewModel.businessData.collectAsState()
-    val metrics by viewModel.financialMetrics.collectAsState()
-    val scenarios by viewModel.savedScenarios.collectAsState()
-    val isSaving by viewModel.isLoading.collectAsState()
+    val data by viewModel.businessData.collectAsStateWithLifecycle()
+    val metrics by viewModel.financialMetrics.collectAsStateWithLifecycle()
+    val scenarios by viewModel.savedScenarios.collectAsStateWithLifecycle()
+    val isSaving by viewModel.isLoading.collectAsStateWithLifecycle()
 
     val snackbarHostState = remember { SnackbarHostState() }
     var showSaveScenarioDialog by remember { mutableStateOf(false) }

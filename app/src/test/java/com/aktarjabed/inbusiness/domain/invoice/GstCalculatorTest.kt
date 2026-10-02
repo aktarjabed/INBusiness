@@ -107,9 +107,9 @@ class GstCalculatorTest {
 
     @Test
     fun testGstinValidationAndSupplyType() {
-        assertEquals(SupplyType.INTRA_STATE, GstCalculator.determineSupplyType("29ABCDE1234F1Z5", "29XYZAB5678C1Z9"))
-        assertEquals(SupplyType.INTER_STATE, GstCalculator.determineSupplyType("29ABCDE1234F1Z5", "27XYZAB5678C1Z9"))
-        assertEquals(SupplyType.UNKNOWN, GstCalculator.determineSupplyType("INVALID", "27XYZAB5678C1Z9"))
+        assertEquals(SupplyType.INTRA_STATE, GstCalculator.determineSupplyType("29ABCDE1234F1ZW", "29XYZAB5678C1Z2"))
+        assertEquals(SupplyType.INTER_STATE, GstCalculator.determineSupplyType("29ABCDE1234F1ZW", "27XYZAB5678C1Z6"))
+        assertEquals(SupplyType.UNKNOWN, GstCalculator.determineSupplyType("INVALID", "27XYZAB5678C1Z6"))
         assertEquals(SupplyType.UNKNOWN, GstCalculator.determineSupplyType(null, null))
     }
 
@@ -117,28 +117,68 @@ class GstCalculatorTest {
 
     @Test
     fun gstinValidationIsCaseInsensitiveAndRejectsMalformedValues() {
-        assertTrue(GstCalculator.isValidGstin("29ABCDE1234F1Z5"))
-        assertTrue("Valid GSTINs are case-insensitive", GstCalculator.isValidGstin("29abcde1234f1z5"))
+        assertTrue(GstCalculator.isValidGstin("29ABCDE1234F1ZW"))
+        assertTrue("Valid GSTINs are case-insensitive", GstCalculator.isValidGstin("29abcde1234f1zw"))
 
         assertFalse("Blank is not a GSTIN", GstCalculator.isValidGstin(""))
         assertFalse("Blank is not a GSTIN", GstCalculator.isValidGstin("   "))
         assertFalse("null is not a GSTIN", GstCalculator.isValidGstin(null))
         assertFalse("14 characters is too short", GstCalculator.isValidGstin("29ABCDE1234F1Z"))
-        assertFalse("16 characters is too long", GstCalculator.isValidGstin("29ABCDE1234F1Z55"))
+        assertFalse("16 characters is too long", GstCalculator.isValidGstin("29ABCDE1234F1ZW5"))
         assertFalse("Missing the trailing entity code", GstCalculator.isValidGstin("29ABCDE1234F1Z"))
         assertFalse("Lowercase state code letters are not digits", GstCalculator.isValidGstin("XXABCDE1234F1Z5"))
         assertFalse("SQL-ish input is not a GSTIN", GstCalculator.isValidGstin("'; DROP TABLE invoices; --"))
     }
 
+    // --- Check digit (Luhn mod 36) ---
+
+    @Test
+    fun realGstinsPassChecksumValidation() {
+        // Reference values from the GSTIN specification / python-stdnum test vectors.
+        assertTrue(GstCalculator.isValidGstin("27AAPFU0939F1ZV"))
+        assertTrue(GstCalculator.isValidGstin("29AAGCB7383J1Z4"))
+        assertTrue(GstCalculator.isValidGstin("27AASCS2460H1Z0"))
+        assertTrue("Check digit validation is case-insensitive", GstCalculator.isValidGstin("27aapfu0939f1zv"))
+    }
+
+    @Test
+    fun wellFormedGstinsWithAWrongCheckDigitAreRejected() {
+        // Format-valid but checksum-invalid: the old regex-only validator accepted these, which
+        // is how a mistyped state code could silently flip CGST/SGST to IGST.
+        assertFalse(GstCalculator.isValidGstin("27AAPFU0939F1ZX"))
+        assertFalse(GstCalculator.isValidGstin("29ABCDE1234F1Z5"))
+        assertFalse(GstCalculator.isValidGstin("27AAAAA0000A1Z5"))
+        assertFalse(GstCalculator.isValidGstin("29ABCDE1234F1Z9"))
+    }
+
+    @Test
+    fun aWrongCheckDigitFallsBackToUnknownSupplyTypeInsteadOfTheWrongTaxTreatment() {
+        // "29ABCDE1234F1Z5" differs from a valid Karnataka GSTIN only in the last character.
+        // determineSupplyType must refuse to guess rather than treat the state code as authoritative.
+        assertEquals(
+            SupplyType.UNKNOWN,
+            GstCalculator.determineSupplyType("29ABCDE1234F1Z5", "18XYZAB5678C1Z5")
+        )
+    }
+
+    @Test
+    fun surroundingWhitespaceIsToleratedByBothValidationAndSupplyType() {
+        assertTrue(GstCalculator.isValidGstin("  29ABCDE1234F1ZW  "))
+        assertEquals(
+            SupplyType.INTRA_STATE,
+            GstCalculator.determineSupplyType(" 29ABCDE1234F1ZW ", "29XYZAB5678C1Z2")
+        )
+    }
+
     @Test
     fun supplyTypeRequiresTwoValidGstins() {
-        assertEquals(SupplyType.UNKNOWN, GstCalculator.determineSupplyType(null, "29ABCDE1234F1Z5"))
-        assertEquals(SupplyType.UNKNOWN, GstCalculator.determineSupplyType("29ABCDE1234F1Z5", null))
-        assertEquals(SupplyType.UNKNOWN, GstCalculator.determineSupplyType("29ABCDE1234F1Z5", "not-a-gstin"))
+        assertEquals(SupplyType.UNKNOWN, GstCalculator.determineSupplyType(null, "29ABCDE1234F1ZW"))
+        assertEquals(SupplyType.UNKNOWN, GstCalculator.determineSupplyType("29ABCDE1234F1ZW", null))
+        assertEquals(SupplyType.UNKNOWN, GstCalculator.determineSupplyType("29ABCDE1234F1ZW", "not-a-gstin"))
         // Same state code prefix => intra-state.
-        assertEquals(SupplyType.INTRA_STATE, GstCalculator.determineSupplyType("29ABCDE1234F1Z5", "29XYZAB5678C1Z9"))
+        assertEquals(SupplyType.INTRA_STATE, GstCalculator.determineSupplyType("29ABCDE1234F1ZW", "29XYZAB5678C1Z2"))
         // Different state code prefix => inter-state.
-        assertEquals(SupplyType.INTER_STATE, GstCalculator.determineSupplyType("29ABCDE1234F1Z5", "18XYZAB5678C1Z9"))
+        assertEquals(SupplyType.INTER_STATE, GstCalculator.determineSupplyType("29ABCDE1234F1ZW", "18XYZAB5678C1Z5"))
     }
 
     @Test(expected = IllegalArgumentException::class)

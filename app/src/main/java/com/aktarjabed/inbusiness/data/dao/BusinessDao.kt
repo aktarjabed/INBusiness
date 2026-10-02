@@ -8,11 +8,13 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface BusinessDao {
 
-    @Query("SELECT * FROM business_data LIMIT 1")
-    suspend fun getBusinessData(): BusinessData?
-
-    @Query("SELECT * FROM business_data LIMIT 1")
-    fun getBusinessDataFlow(): Flow<BusinessData?>
+    // NOTE: there is deliberately no "get the business profile" query that does not name an id.
+    // `business_data` holds BOTH the live business profile and the calculator's saved scenarios,
+    // one row each, and `insertBusinessData` uses REPLACE — which deletes and re-inserts, giving
+    // the profile a fresh rowid. A `SELECT * FROM business_data LIMIT 1` therefore stops meaning
+    // "the business" as soon as the profile is edited: verified against SQLite, it returns a
+    // scenario row instead. Callers must resolve the active id from BusinessContext and use
+    // [getBusinessDataById].
 
     @Query("SELECT * FROM business_data")
     fun getAllBusinessData(): Flow<List<BusinessData>>

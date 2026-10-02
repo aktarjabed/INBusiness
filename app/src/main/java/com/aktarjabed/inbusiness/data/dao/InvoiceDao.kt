@@ -24,24 +24,25 @@ interface InvoiceDao {
     @Query("SELECT * FROM invoice_items WHERE invoiceId = :invoiceId AND invoiceId IN (SELECT id FROM invoices WHERE businessId = :businessId)")
     suspend fun getInvoiceItems(invoiceId: String, businessId: String): List<InvoiceItem>
 
-        @Query("""
+    /**
+     * Every invoice line for [businessId], newest invoice first, with the same total order
+     * ("invoice createdAt DESC, item id DESC") the previous implementation used.
+     *
+     * This deliberately returns *all* lines instead of filtering to one row per product in SQL.
+     * The previous query used a correlated scalar subquery in the WHERE clause, which SQLite
+     * re-evaluates once per candidate row: on a real engine 1.5k lines took ~0.6 s and 20k lines
+     * took >100 s, so the invoice screen (product autocomplete) would jank or ANR on real data.
+     *
+     * Callers that need one line per product must collapse the list with
+     * `collapseHistoryToLatest()`; because the order above matches the old subquery exactly,
+     * "first row per key" selects the identical line the old query returned.
+     */
+    @Query("""
         SELECT i.*
         FROM invoice_items i
         INNER JOIN invoices inv ON i.invoiceId = inv.id
         WHERE inv.businessId = :businessId
-          AND i.id = (
-              SELECT i2.id FROM invoice_items i2
-              INNER JOIN invoices inv2 ON i2.invoiceId = inv2.id
-              WHERE inv2.businessId = :businessId
-                AND IFNULL(i2.productId, -1) = IFNULL(i.productId, -1)
-                AND (
-                    (i.productId IS NOT NULL) OR
-                    (i.productId IS NULL AND LOWER(TRIM(i2.description)) = LOWER(TRIM(i.description)))
-                )
-              ORDER BY inv2.createdAt DESC, i2.id DESC
-              LIMIT 1
-          )
-        ORDER BY inv.createdAt DESC
+        ORDER BY inv.createdAt DESC, i.id DESC
     """)
     fun getHistoricalInvoiceItems(businessId: String): Flow<List<InvoiceItem>>
 

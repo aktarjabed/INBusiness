@@ -15,9 +15,42 @@ object GstCalculator {
      */
     private val GSTIN_REGEX = Regex("^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$")
 
+    /** Base-36 code point alphabet used by the GSTIN check digit (Luhn mod 36). */
+    private const val GSTIN_CODE_POINTS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+    /**
+     * Validates a GSTIN's format **and** its check digit.
+     *
+     * The 15th character is a Luhn mod 36 check digit over the first 14. Format-only validation
+     * lets a mistyped-but-well-formed GSTIN through, and because the first two digits are the
+     * state code, a single mistyped state digit silently flips the invoice between CGST+SGST and
+     * IGST — a tax-compliance error, not a cosmetic one. A typo anywhere else in the PAN is only
+     * caught by the check digit.
+     *
+     * The check digit is a hard gate in a few places: [determineSupplyType] returns UNKNOWN for a
+     * failing GSTIN, and the setup/invoice screens refuse to save one, so an unregistered buyer
+     * must leave the field blank (the intended flow) rather than entering a placeholder. The
+     * invoice screen's manual Intra/Inter selector is the escape hatch when a real counterparty's
+     * GSTIN still fails.
+     */
     fun isValidGstin(gstin: String?): Boolean {
         if (gstin.isNullOrBlank()) return false
-        return GSTIN_REGEX.matches(gstin.uppercase())
+        val normalized = gstin.trim().uppercase()
+        if (!GSTIN_REGEX.matches(normalized)) return false
+        return normalized[14] == gstinCheckDigit(normalized.substring(0, 14))
+    }
+
+    /**
+     * Luhn mod 36 check digit for the first 14 characters of a GSTIN.
+     * The specification's worked example is `27AAPFU0939F1ZV` -> `V`.
+     */
+    private fun gstinCheckDigit(first14: String): Char {
+        var sum = 0
+        for ((index, char) in first14.withIndex()) {
+            val product = GSTIN_CODE_POINTS.indexOf(char) * if (index % 2 == 0) 1 else 2
+            sum += product / 36 + product % 36
+        }
+        return GSTIN_CODE_POINTS[(36 - sum % 36) % 36]
     }
 
     /**
@@ -33,8 +66,10 @@ object GstCalculator {
             return SupplyType.UNKNOWN
         }
 
-        val sellerState = sellerGstin.substring(0, 2)
-        val buyerState = buyerGstin.substring(0, 2)
+        // Trim only; case is comparison-irrelevant (digits vs digits) and the values themselves
+        // are normalized to uppercase before they are persisted by the callers.
+        val sellerState = sellerGstin.trim().substring(0, 2)
+        val buyerState = buyerGstin.trim().substring(0, 2)
 
         return if (sellerState == buyerState) {
             SupplyType.INTRA_STATE
